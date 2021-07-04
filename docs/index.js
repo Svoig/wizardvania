@@ -30,15 +30,15 @@ const mapTokenConfig = {
     height: TILE_UNIT,
     pos: vec2(0, 0),
     "=": [rect(TILE_UNIT, TILE_UNIT), color(0.45, 0.1, 0.1), solid(), "terrain"], // Ground
-    "#": [rect(TILE_UNIT, TILE_UNIT), color()], // Lava
+    "#": [rect(TILE_UNIT, TILE_UNIT), color(1.0, 0.75, 0), solid(), "terrain", "lava", "hurt"], // Lava
     "o": [rect(5, 5), color( 1.0,  1.0, 0), "coin"], // Coin
     "P": ["playerStart"], // Player start
     "^": [rect(5, 5), color(0,  1.0,  1.0), "extraBoost"], // Extra boost powerup
     "§": respawningExtraBoostComponents, // Respawning Extra Boost powerup,
     "S": [rect(5, 5), color(0.25, 0.75, 0.95), body(), { strength: 1, health: 1 }, "slime", "enemy"],// Slime
     "G": [rect(TILE_UNIT, TILE_UNIT), color(0,  1.0, 0), body({jumpForce: GOBLIN_JUMP_FORCE}), { strength: 1, health: 2 }, "goblin", "enemy"], // Goblin,
-    "h": [rect(5, 5), color( 1.0, 0, 0), body(), { strength: 1 }, "minorHealthPotion", "healthPotion", "potion"], // Minor Health Potion
-    "H": [rect(TILE_UNIT, TILE_UNIT), color( 1.0, 0, 0), body(), { strength: 3 }, "majorHealthPotion", "healthPotion", "potion"], // Major Health Potion
+    "h": [rect(5, 5), color( 1.0, 0, 0.5), body(), { strength: 1 }, "minorHealthPotion", "healthPotion", "potion"], // Minor Health Potion
+    "H": [rect(TILE_UNIT, TILE_UNIT), color( 1.0, 0, 0.5), body(), { strength: 3 }, "majorHealthPotion", "healthPotion", "potion"], // Major Health Potion
 };
 
 function addPlayer() {
@@ -108,6 +108,10 @@ function sceneSetup(player) {
 
     action("slime", (slime) => {
         slime.move(-20, 0);
+    });
+
+    player.collides("hurt", () => {
+        go("gameOver", { returnScene: "one" })
     });
 
     player.collides("enemy", (enemy) => {
@@ -351,56 +355,56 @@ scene("gameOver", ({ returnScene }) => {
 scene("one", () => {
     gravity(GRAVITY);
     const map = addLevel([
-        "                                                                                                                              ", "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ", "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                ooooooooooooooo                                                               ",
-        "                                                ooooooooooooooo                                                               ",
-        "                                                ooooooooooooooo                                                               ",
-        "                                                ===============                                                               ",
-        " =======                      ===                                                                                             ",
-        "                                                                                                                              ",
-        "                                             ===                                              H                               ",
-        "                  o                                                                     ===============                       ",
-        "                 ===         ooo           ==                                                                                 ",
-        "                          ======                                                                                              ",
-        "                                                                             G                                                ",
-        "                  ^                                                        =====                                              ",
-        "       ==     ==========                                                                                                      ",
-        "                                                                                                                              ",
-        "                         ===                                                                                                  ",
-        "                                       oo                                                                                     ",
-        "                                      ====                                                                                    ",
-        "                                                       oo                                                                     ",
-        "                                       oooo           =====                                                                   ",
-        "                                      =======                                                                                 ",
-        "                                                                                                                              ",
-        "                          ooo G                                                                                               ",
-        "                        =======                                                                                               ",
-        "                                                                                                                              ",
-        "P    §                        S             h                                                                                 ",
-        "=============================================================================================================================="
+        "=                                                                                                                             ", "                                                                                                                              ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ", "                                                                                                                              ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                               ooooooooooooooo                                                               ",
+        "=                                               ooooooooooooooo                                                               ",
+        "=                                               ooooooooooooooo                                                               ",
+        "=                                               ===============                                                               ",
+        "========                      ===                                                                                             ",
+        "=                                                                                                                             ",
+        "=                                            ===                                              H                               ",
+        "=                 o                                                                     ===============                       ",
+        "=                ===         ooo           ==                                                                                 ",
+        "=                         ======                                                                                              ",
+        "=                                                                            G                                                ",
+        "=                 ^                                                        =====                                              ",
+        "=      ==     ==========                                                                                                      ",
+        "=                                                                                                                             ",
+        "=                        ===                                                                                                  ",
+        "=                                      oo                                                                                     ",
+        "=                                     ====                                                                                    ",
+        "=                                                      oo                                                                     ",
+        "=                                      oooo           =====                                                                   ",
+        "=                                     =======                                                                                 ",
+        "=                                                                                                                             ",
+        "=                         ooo G                                                                                               ",
+        "=                       =======                                                                                               ",
+        "=                                                                                                                             ",
+        "=P   §                        S             h                                                                                 ",
+        "=====================================================####====================================================================="
     ],
         mapTokenConfig
     );
