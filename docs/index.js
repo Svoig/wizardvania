@@ -1,10 +1,24 @@
+const GAME_SCALE = 3;
+const CUTOFF_DISTANCE = 300;
+
+const BULLET_SPEED = 300;
+const PLAYER_MOVE_SPEED = 125;
+const PLAYER_BOOST_SPEED = 200;
+const PLAYER_JUMP_FORCE = 250;
+const MAX_VELOCITY = 200;
+const TILE_UNIT = 10;
+const GRAVITY = 980;
+const GOBLIN_JUMP_FORCE = 200;
+const AIR_BOOST_FORCE = 100;
+
 kaboom({
     global: true,
     fullscreen: true,
-    scale: 1.25,
+    scale: GAME_SCALE,
     debug: true,
     clearColor: [0, 0, 0, 1],
 });
+
 
 const FIRE = "fire";
 const WATER = "water";
@@ -25,12 +39,12 @@ const getElement = (lastElement) => {
     return choose(filteredElements);
 }
 
-const getHazardForElement = (element) => {
+const getHazardTerrainForElement = (element) => {
     switch (element) {
         case FIRE:
             return [rect(TILE_UNIT, TILE_UNIT), color(1.0, 0.75, 0), solid(), "terrain", "lava", "kill"]; // Lava
         case WATER:
-            return [rect(TILE_UNIT, TILE_UNIT), color(0, 1, 1), solid(), "terrain", "ice"]; // Ice
+            return [rect(TILE_UNIT, TILE_UNIT), color(0, 1, 1), solid(), "terrain", "ice", "slippery"]; // Ice
         case EARTH:
             return [rect(TILE_UNIT, TILE_UNIT), color(0.25, 0.1, 0.1), solid(), "terrain", "crumblingBlock"]; // Crumbling block
         case AIR:
@@ -40,13 +54,13 @@ const getHazardForElement = (element) => {
     }
 }
 
-const BULLET_SPEED = 300;
-const PLAYER_MOVE_SPEED = 125;
-const PLAYER_BOOST_SPEED = 200;
-const PLAYER_JUMP_FORCE = 250;
-const TILE_UNIT = 10;
-const GRAVITY = 980;
-const GOBLIN_JUMP_FORCE = 200;
+const getHazardForElement = (element) => {
+    switch (element) {
+        case AIR:
+            return [rect(TILE_UNIT, TILE_UNIT), color(0.75, 0.75, 0.75), "airBoost"];
+    }
+}
+
 
 // Keys
 const UP = "w";
@@ -59,6 +73,40 @@ const BOOST = "shift";
 // Reusable components for creating things dynamically
 const respawningExtraBoostComponents = [rect(5, 5), color(1.0, 0, 1.0), "respawningExtraBoost"];
 const explosionComponents = [rect(TILE_UNIT, TILE_UNIT), color(1, 1, 1), origin("center"), "explosion"];
+const coinComponents = [rect(5, 5), color(1.0, 1.0, 0), "coin"];
+const extraBoostComponents = [rect(5, 5), color(0, 1.0, 1.0), "extraBoost"];
+const majorHealthPotionComponents = [rect(TILE_UNIT, TILE_UNIT), color(1.0, 0, 0.5), body(), { strength: 3 }, "majorHealthPotion", "healthPotion", "potion"];
+const minorHealthPotionComponents = [rect(5, 5), color(1.0, 0, 0.5), body(), { strength: 1 }, "minorHealthPotion", "healthPotion", "potion"];
+
+const destroyBullet = (bullet) => {
+    destroy(bullet);
+    const bulletHitIndicator = add([...explosionComponents, pos(bullet.pos.x, bullet.pos.y)]);
+    bulletHitIndicator.action(() => {
+        bulletHitIndicator.width++;
+        bulletHitIndicator.height++;
+    });
+    wait(0.125, () => {
+        destroy(bulletHitIndicator);
+    });
+}
+
+const breakCrate = (crate) => {
+    destroy(crate);
+
+    // Very rarely create an extra boost in the crate
+    if (Math.round(rand(0, 1000)) === 71) {
+        add([...extraBoostComponents, pos(crate.pos)]);
+    } else if (Math.round(rand(0, 1000)) % 100 === 0) {
+        // Less rarely add a major health potion
+        add([...majorHealthPotionComponents, pos(crate.pos)]);
+    } else if (Math.round(rand(0, 1000)) % 50 === 0) {
+        // Even less rarely add a minor health potion
+        add([...minorHealthPotionComponents, pos(crate.pos)]);
+    } else if (Math.round(rand(0, 1000)) % 10 === 0) {
+        // Fairly often add a coin
+        add([...coinComponents, pos(crate.pos)]);
+    }
+}
 
 const mapTokenConfig = (element) => ({
     width: TILE_UNIT,
@@ -67,19 +115,22 @@ const mapTokenConfig = (element) => ({
     // End of level goal
     "*": [rect(TILE_UNIT / 2, TILE_UNIT / 2), origin("center"), "goal"],
     // Terrain & hazards
+    // TODO: Change colors based on element
     "x": [rect(TILE_UNIT, TILE_UNIT), color(0, 0, 0, 0), "outOfBounds", "kill"], // Kill the player if they go out of bounds (like in a pit)
-    "=": [rect(TILE_UNIT, TILE_UNIT), color(0.45, 0.1, 0.1), solid(), "terrain"], // Ground
-    "#": getHazardForElement(element), // Elemental Hazard
+    "=": [rect(TILE_UNIT, TILE_UNIT), color(0.45, 0.1, 0.1), solid(), "terrain", "nonSlipperyTerrain"], // Ground
+    "%": [rect(TILE_UNIT, TILE_UNIT), color(0.25, 0.25, 0.25), solid(), "crate"],// Destructible crates
+    "#": getHazardTerrainForElement(element), // Elemental Hazard Terrain
+    "!": getHazardForElement(element),
     // Collectibles & powerups
-    "o": [rect(5, 5), color(1.0, 1.0, 0), "coin"], // Coin
+    "o": coinComponents, // Coin
     "P": ["playerStart"], // Player start
-    "^": [rect(5, 5), color(0, 1.0, 1.0), "extraBoost"], // Extra boost powerup
+    "^": extraBoostComponents, // Extra boost powerup
     "§": respawningExtraBoostComponents, // Respawning Extra Boost powerup,
-    "h": [rect(5, 5), color(1.0, 0, 0.5), body(), { strength: 1 }, "minorHealthPotion", "healthPotion", "potion"], // Minor Health Potion
-    "H": [rect(TILE_UNIT, TILE_UNIT), color(1.0, 0, 0.5), body(), { strength: 3 }, "majorHealthPotion", "healthPotion", "potion"], // Major Health Potion
+    "h": minorHealthPotionComponents, // Minor Health Potion
+    "H": majorHealthPotionComponents, // Major Health Potion
     // Enemies
-    "S": [rect(5, 5), color(0.25, 0.75, 0.95), body(), { strength: 1, health: 1 }, "slime", "enemy"],// Slime
-    "G": [rect(TILE_UNIT, TILE_UNIT), color(0, 1.0, 0), body({ jumpForce: GOBLIN_JUMP_FORCE }), { strength: 1, health: 2 }, "goblin", "enemy"], // Goblin,
+    "S": [rect(5, 5), color(0.25, 0.75, 0.95), body({ maxVel: MAX_VELOCITY }), { strength: 1, health: 1, scoreValue: 1 }, "slime", "enemy"],// Slime
+    "G": [rect(TILE_UNIT, TILE_UNIT), color(0, 1.0, 0), body({ maxVel: MAX_VELOCITY }), { strength: 1, health: 2, canShoot: true, scoreValue: 5 }, "goblin", "enemy"], // Goblin,
 });
 
 function addPlayer() {
@@ -87,7 +138,7 @@ function addPlayer() {
         rect(TILE_UNIT, TILE_UNIT),
         color(1.0, 0, 0),
         pos(-1000, -1000), // Start offscreen. Let every("playerStart") put the player in the right place
-        body(),
+        body({ maxVel: MAX_VELOCITY }),
         {
             boostTarget: null,
             canBoost: true,
@@ -98,32 +149,56 @@ function addPlayer() {
             numBoosts: 1,
             strength: 1,
             tempBoosts: 0,
+            moveSpeed: PLAYER_MOVE_SPEED,
         }
     ]);
 }
 
 function sceneSetup({ player, element, nextLevel }) {
+    gravity(GRAVITY);
+
+    const cameraSensor = add([pos(player.pos.x, player.pos.y), "cameraSensor"]);
+    cameraSensor.action(() => {
+        camPos(player.pos.x, player.pos.y - 50);
+    });
 
     const score = add([
-        text(`Score: 0`, 16),
+        text(`Score: 0`, 8),
         color(1.0, 1.0, 0),
-        pos(10, 10),
+        pos(player.pos.x, player.pos.y - 100),
         { value: 0 }
     ]);
 
+    score.action(() => {
+        score.pos.x = player.pos.x - 200;
+        score.pos.y = player.pos.y - 175;
+    });
+
     const boostText = add([
-        text(getBoostIndicators(player), 16),
+        text(getBoostIndicators(player), 8),
         color(0, 1.0, 1.0),
-        pos(250, 10),
+        pos(score.pos.x + score.width + 25, score.pos.y),
         { value: player.maxBoosts + player.tempBoosts }
     ]);
 
+    boostText.action(() => {
+        // Set it to position of score text, shifted right by width of score text
+        // Setting directly using score.pos.x leads to staggered text movement
+        boostText.pos.x = player.pos.x - (200 - score.width) + 25;
+        boostText.pos.y = player.pos.y - 175;
+    });
+
     const healthText = add([
-        text(getPlayerHealth(player), 16),
+        text(getPlayerHealth(player), 8),
         color(1.0, 0, 0),
-        pos(550, 10),
+        pos(boostText.pos.x + boostText.width + 25, boostText.pos.y),
         { value: player.health }
     ]);
+
+    healthText.action(() => {
+        healthText.pos.x = player.pos.x - (200 - score.width - boostText.width - 25) + 25;;
+        healthText.pos.y = player.pos.y - 175;
+    });
 
     // every("goal", (goal) => {
     // let growOrShrink = 1;
@@ -158,24 +233,79 @@ function sceneSetup({ player, element, nextLevel }) {
                 explosion.width++;
                 explosion.height++;
             });
+            score.value += enemy.scoreValue;
+            score.text = `Score: ${score.value}`;
             wait(0.125, () => {
                 destroy(explosion);
             });
         }
     });
 
-    every("goblin", (goblin) => {
-        loop(1.25, () => {
-            goblin.jump();
+    every("crate", (crate) => {
+        // crate.collides("PLAYER_BULLET", () => {
+        //     breakCrate(crate);
+        // });
+
+        crate.collides("ENEMY_BULLET", () => {
+            breakCrate(crate);
         });
     });
 
+    // every("goblin", (goblin) => {
+    //     loop(1.25, () => {
+
+    //     });
+    // });
+
     action("goblin", (goblin) => {
-        goblin.move(-50, 0);
+        // Don't move if it's too far from the player
+        if (goblin.pos.dist(player.pos) <= CUTOFF_DISTANCE) {
+            goblin.move(-50, 0);
+
+            // Don't shoot if it's too far from the player
+            if (Math.round(rand(0, 100)) % 23 === 0 && goblin.canShoot) {
+                let bulletSpeedX = BULLET_SPEED;
+                let bulletSpeedY = 0;
+
+                // Shoot right if distance is positive, left if distance is negative
+                const direction = player.pos.x - goblin.pos.x >= 0 ? 1 : -1;
+
+                bulletSpeedX *= direction;
+
+                const bullet = add([
+                    rect(5, 5),
+                    color(0.25, 1.0, 0.1),
+                    pos(goblin.pos.x, goblin.pos.y),
+                    "ENEMY_BULLET",
+                    { strength: goblin.strength }
+                ]);
+
+                bullet.action(() => {
+                    bullet.move(bulletSpeedX, bulletSpeedY);
+                });
+
+                bullet.collides("player", () => destroyBullet(bullet));
+                bullet.collides("enemy", () => destroyBullet(bullet));
+                bullet.collides("terrain", () => destroyBullet(bullet));
+                bullet.collides("crate", (crate) => {
+                    breakCrate(crate);
+                    destroyBullet(bullet);
+                });
+
+                goblin.canShoot = false;
+
+                wait(1, () => {
+                    destroy(bullet);
+                    goblin.canShoot = true;
+                });
+            }
+        }
     });
 
     action("slime", (slime) => {
-        slime.move(-20, 0);
+        if (slime.pos.dist(player.pos) <= CUTOFF_DISTANCE) {
+            slime.move(-20, 0);
+        }
     });
 
     player.collides("goal", () => {
@@ -195,15 +325,37 @@ function sceneSetup({ player, element, nextLevel }) {
         })
     });
 
+    player.collides("airBoost", () => {
+        player.jump({ jumpForce: AIR_BOOST_FORCE });
+    });
+
+    player.collides("ice", () => {
+        if (player.grounded()) {
+            // TODO: Why doesn't this work?
+            player.moveSpeed = PLAYER_MOVE_SPEED * 2;
+        }
+    });
+
+    player.collides("nonSlipperyTerrain", () => {
+        if (player.grounded()) {
+            player.moveSpeed = PLAYER_MOVE_SPEED;
+        }
+    });
+
     player.collides("enemy", (enemy) => {
         player.health -= enemy.strength;
         healthText.text = getPlayerHealth(player);
-    })
+    });
+
+    player.collides("ENEMY_BULLET", (bullet) => {
+        player.health -= bullet.strength;
+        healthText.text = getPlayerHealth(player);
+    });
 
     player.collides("boss", (boss) => {
         player.health -= boss.strength;
         healthText.text = getPlayerHealth(player);
-    })
+    });
 
     player.collides("coin", (coin) => {
         destroy(coin);
@@ -249,6 +401,13 @@ function sceneSetup({ player, element, nextLevel }) {
         boostText.text = getBoostIndicators(player);
     })
 
+    // there's no spatial hashing yet, if too many blocks causing lag, consider hard disabling collision resolution from blocks far away by turning off 'solid'
+    // (from the Kaboom docs)
+    // Re-enable and troubleshoot if performance tanks
+    // action("terrain", (terrain) => {
+    //     terrain.solid = player.pos.dist(terrain.pos) <= CUTOFF_DISTANCE;
+    // });
+
     keyDown(SHOOT, () => {
         if (player.canShoot) {
             let bulletSpeedX = BULLET_SPEED;
@@ -261,28 +420,11 @@ function sceneSetup({ player, element, nextLevel }) {
                 "PLAYER_BULLET"
             ]);
 
-            bullet.collides("enemy", (enemy) => {
-                destroy(bullet);
-                const bulletHitIndicator = add([...explosionComponents, pos(bullet.pos.x, bullet.pos.y)]);
-                bulletHitIndicator.action(() => {
-                    bulletHitIndicator.width++;
-                    bulletHitIndicator.height++;
-                });
-                wait(0.125, () => {
-                    destroy(bulletHitIndicator);
-                });
-            });
-
-            bullet.collides("terrain", () => {
-                destroy(bullet);
-                const bulletHitIndicator = add([...explosionComponents, pos(bullet.pos.x, bullet.pos.y)]);
-                bulletHitIndicator.action(() => {
-                    bulletHitIndicator.width++;
-                    bulletHitIndicator.height++;
-                });
-                wait(0.125, () => {
-                    destroy(bulletHitIndicator);
-                });
+            bullet.collides("enemy", () => destroyBullet(bullet));
+            bullet.collides("terrain", () => destroyBullet(bullet));
+            bullet.collides("crate", (crate) => {
+                breakCrate(crate);
+                destroyBullet(bullet);
             });
 
             if (keyIsDown(UP)) {
@@ -308,7 +450,7 @@ function sceneSetup({ player, element, nextLevel }) {
 
             wait(1, () => {
                 destroy(bullet);
-            })
+            });
         }
     });
 
@@ -316,6 +458,7 @@ function sceneSetup({ player, element, nextLevel }) {
         // If they're boosting, ignore arrow keys
         if (!player.boostTarget) {
             player.move(PLAYER_MOVE_SPEED, 0);
+            cameraSensor.move(PLAYER_MOVE_SPEED, 0);
         }
     });
 
@@ -323,6 +466,7 @@ function sceneSetup({ player, element, nextLevel }) {
         // If they're boosting, ignore arrow keys
         if (!player.boostTarget) {
             player.move(-PLAYER_MOVE_SPEED, 0);
+            cameraSensor.move(-PLAYER_MOVE_SPEED, 0);
         }
     });
 
@@ -388,12 +532,11 @@ function sceneSetup({ player, element, nextLevel }) {
             // Update the UI indicator of the number of boosts available
             boostText.text = getBoostIndicators(player);
 
-
             // Clear out boost target after .25s to avoid player getting pulled toward target forever
             wait(0.25, () => {
                 gravity(GRAVITY);
                 player.boostTarget = null;
-            })
+            });
         }
     });
 
@@ -413,6 +556,7 @@ function sceneSetup({ player, element, nextLevel }) {
             // Lerp 3 steps to boost target
             const nextPos = vec2(lerp(player.pos.x, player.boostTarget.x, 3), lerp(player.pos.y, player.boostTarget.y, 3));
             player.move(nextPos.x - player.pos.x, nextPos.y - player.pos.y);
+            cameraSensor.move(nextPos.x - player.pos.x, nextPos.y - player.pos.y);
         }
     });
 }
@@ -440,7 +584,7 @@ function getBoostIndicators(player) {
         boostIndicators += '*';
     }
 
-    return `Boosts: ${boostIndicators}`;
+    return `Boosts: ${boostIndicators || ' '}`;
 }
 
 scene("gameOver", ({ returnScene, lastElement }) => {
@@ -455,64 +599,25 @@ scene("gameOver", ({ returnScene, lastElement }) => {
 scene("one", () => {
     const nextLevel = "two";
     const element = getElement();
-    gravity(GRAVITY);
     const map = addLevel([
-        "==============================================================================================================================",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                               ooooooooooooooo                                                              =",
-        "=                                               ooooooooooooooo                                                              =",
-        "=                                               ooooooooooooooo                                                              =",
-        "=  §                                            ===============                                                              =",
-        "========                      ===                                                                                            =",
-        "=                                                                                                                            =",
-        "=                                            ===                                              *                              =",
-        "=                 o                                                                     ===============                      =",
-        "=                ===         ooo           ==                                                                                =",
-        "=                         ======                                                                                             =",
-        "=                                                                            g                                               =",
-        "=                 ^                                                        =====                                             =",
-        "=      ==     ==========                                                                                                     =",
-        "=                                                                                                                            =",
-        "=                        ===                                             =====                                               =",
-        "=                                      oo                     #########################           ==========                 =",
-        "=                                     ====                                                                                   =",
-        "=                                                      oo                                                                    =",
-        "=                                      oooo           =====             ^                                                    =",
-        "=                                     =======                 ########=====##########==========                              =",
-        "=                                                                                                                            =",
-        "=                         ooo g                                                                                              =",
-        "=                       =======                                                                                              =",
-        "=                                                                                                                            =",
-        "=P                            s             h                                                                                =",
-        "============####=====================================####=========####========================================================",
-        "                                                                                                                             =",
-        "                                                                                                                             =",
-        "                                                                                                                             =",
-        "                                                                                                                             =",
-        "                                                                                                                             =",
-        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        "==============================",
+        "=                            =",
+        "=                            =",
+        "=                          * =",
+        "=            o           =====",
+        "=          o ==              =",
+        "=        o                   =",
+        "=      o                     =",
+        "=ooo o                       =",
+        "====                     oooo=",
+        "=                 o o    =====",
+        "=              o  ====       =",
+        "=P          o                =",
+        "=================######=======",
+        "                              ",
+        "                              ",
+        "                              ",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
     ],
         mapTokenConfig(element)
     );
@@ -528,62 +633,41 @@ scene("one", () => {
     });
 });
 
-scene("two", () => {
+scene("two", ({ lastElement }) => {
+    const nextLevel = "three";
+    const element = getElement(lastElement);
     const map = addLevel([
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              ",
-        "                                                                                                                              "
+        "====================================================",
+        "=                                   %              =",
+        "=                                   %              =",
+        "=                                   %              =",
+        "=                                   %              =",
+        "=                                   %              =",
+        "=          oo           o           %     oo   S * =",
+        "=          ==          ===          ================",
+        "=                                                  =",
+        "=                                                  =",
+        "=   ==                                             =",
+        "=                                                  =",
+        "= P     ooo             S      ooo                 =",
+        "================!!!!================================",
+        "                                                    ",
+        "                                                    ",
+        "                                                    ",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
     ],
-        mapTokenConfig);
+        mapTokenConfig(element)
+    );
 
     const player = addPlayer();
+
+    sceneSetup({ player, element, nextLevel });
+
+    // Use the "playerStart" object from the map to set start position
+    every("playerStart", (playerStart) => {
+        player.pos.x = playerStart.pos.x;
+        player.pos.y = playerStart.pos.y;
+    });
 });
 
 start("one");
