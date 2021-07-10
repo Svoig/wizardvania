@@ -1,5 +1,5 @@
 const GAME_SCALE = 3;
-const CUTOFF_DISTANCE = 300;
+const CUTOFF_DISTANCE = 500;
 
 const BULLET_SPEED = 300;
 const PLAYER_MOVE_SPEED = 125;
@@ -9,7 +9,9 @@ const MAX_VELOCITY = 200;
 const TILE_UNIT = 10;
 const GRAVITY = 980;
 const GOBLIN_JUMP_FORCE = 200;
-const AIR_BOOST_FORCE = 100;
+const AIR_BLAST_FORCE = 50;
+const LAVA_BUBBLE_JUMP_FORCE = 300;
+
 
 kaboom({
     global: true,
@@ -19,6 +21,15 @@ kaboom({
     clearColor: [0, 0, 0, 1],
 });
 
+const PLAYER_STATE = {
+    health: 3,
+    maxHealth: 3,
+    maxBoosts: 1,
+    numBoosts: 1,
+    tempBoosts: 0,
+    score: 0
+};
+
 
 const FIRE = "fire";
 const WATER = "water";
@@ -26,6 +37,56 @@ const EARTH = "earth";
 const AIR = "air";
 
 const ELEMENTS = [FIRE, WATER, EARTH, AIR];
+
+// COLORS
+const LAVA_BUBBLE_COLOR = color(0.85, 0.25, 0.0);
+const ICICLE_COLOR = color(0, 0.25, 0.85);
+
+
+function generateBragText({ tookDamage, defeatedEnemy, collectedItem, retried }) {
+    const bragIntros = [
+        `As I stepped over the threshold into the chamber, I was filled with\ncomplete confidence in my exemplary skills and finesse.\n`,
+        `This room was filled with horrific dangers the likes of which I\nhad never seen. Well, I had seen the likes of them, but ordinary people like you\ndefinitely haven't.\n`,
+    ];
+
+    const tookDamageBrags = [
+        `I was invincible! None of the nightmarish dangers even came close to me.\n`,
+        `I skillfully avoided every danger with, if I may say so, poise and elegance\n`,
+    ];
+
+    const defeatedNoEnemiesBrags = [
+        `Every foul, slobbering monster fell before my might.\n`,
+        `Not one soulless demon was left standing by the time I approached the exit.\n`
+    ];
+
+    const collectedNoItemBrags = [
+        `I found treasures in that room you couldn't even imagine! Don't ask to see\nthem, though. They're... *ahem*, they're too dangerous for mortal eyes to behold.\n`,
+        `As if my pockets weren't already heavy enough with gold and priceless artifacts,\nthis chamber was an absolute treasure trove!\n`,
+    ];
+
+    const concludingBrags = [
+        `One step closer to the treasure I so clearly deserve!`,
+        `If the rest of the temple is like this, I'll be home by lunch!`
+    ];
+
+    let bragText = choose(bragIntros);
+
+    if (tookDamage || retried) {
+        bragText += choose(tookDamageBrags);
+    }
+
+    if (!defeatedEnemy) {
+        bragText += choose(defeatedNoEnemiesBrags);
+    }
+
+    if (!collectedItem) {
+        bragText += choose(collectedNoItemBrags);
+    }
+
+    bragText += choose(concludingBrags);
+
+    return bragText;
+}
 
 /**
  * Choose a random element to be used to create different hazards, etc for each attempt at a level
@@ -56,8 +117,12 @@ const getHazardTerrainForElement = (element) => {
 
 const getHazardForElement = (element) => {
     switch (element) {
+        case FIRE:
+            return [rect(TILE_UNIT, TILE_UNIT), LAVA_BUBBLE_COLOR, "lavaBubble", "kill", { canJump: true, strength: 1 }];
+        case WATER:
+            return [rect(TILE_UNIT, TILE_UNIT), ICICLE_COLOR, solid(), "icicle", "ice", { canFall: true, strength: 1 }];
         case AIR:
-            return [rect(TILE_UNIT, TILE_UNIT), color(0.75, 0.75, 0.75), "airBoost"];
+            return [rect(TILE_UNIT, TILE_UNIT), color(0.75, 0.75, 0.75), "airBlast"];
     }
 }
 
@@ -108,6 +173,12 @@ const breakCrate = (crate) => {
     }
 }
 
+const handleAirBlast = (obj) => {
+    if (obj.jump) {
+        obj.jump({ jumpForce: AIR_BLAST_FORCE });
+    }
+}
+
 const mapTokenConfig = (element) => ({
     width: TILE_UNIT,
     height: TILE_UNIT,
@@ -139,6 +210,7 @@ function addPlayer() {
         color(1.0, 0, 0),
         pos(-1000, -1000), // Start offscreen. Let every("playerStart") put the player in the right place
         body({ maxVel: MAX_VELOCITY }),
+        "player",
         {
             boostTarget: null,
             canBoost: true,
@@ -150,16 +222,30 @@ function addPlayer() {
             strength: 1,
             tempBoosts: 0,
             moveSpeed: PLAYER_MOVE_SPEED,
+            isFreezing: false,
+            score: 0
         }
     ]);
 }
 
-function sceneSetup({ player, element, nextLevel }) {
+function sceneSetup({ player, element, currentLevel, nextLevel, hasRetried }) {
+    PLAYER_STATE.health = PLAYER_STATE.maxHealth;
+    const sceneState = {
+        defeatedEnemy: false,
+        collectedItem: false,
+        retried: hasRetried,
+        tookDamage: false,
+    };
+    debug.showLog = true;
     gravity(GRAVITY);
 
-    const cameraSensor = add([pos(player.pos.x, player.pos.y), "cameraSensor"]);
-    cameraSensor.action(() => {
+    player.action(() => {
         camPos(player.pos.x, player.pos.y - 50);
+
+        if (player.isFreezing) {
+            PLAYER_STATE.health -= 0.0125;
+            healthText.text = getPlayerHealth();
+        }
     });
 
     const score = add([
@@ -178,7 +264,7 @@ function sceneSetup({ player, element, nextLevel }) {
         text(getBoostIndicators(player), 8),
         color(0, 1.0, 1.0),
         pos(score.pos.x + score.width + 25, score.pos.y),
-        { value: player.maxBoosts + player.tempBoosts }
+        { value: PLAYER_STATE.maxBoosts + PLAYER_STATE.tempBoosts }
     ]);
 
     boostText.action(() => {
@@ -189,10 +275,10 @@ function sceneSetup({ player, element, nextLevel }) {
     });
 
     const healthText = add([
-        text(getPlayerHealth(player), 8),
+        text(getPlayerHealth(), 8),
         color(1.0, 0, 0),
         pos(boostText.pos.x + boostText.width + 25, boostText.pos.y),
-        { value: player.health }
+        { value: PLAYER_STATE.health }
     ]);
 
     healthText.action(() => {
@@ -224,17 +310,23 @@ function sceneSetup({ player, element, nextLevel }) {
         enemy.collides("kill", () => {
             // TODO: Let fire enemies walk on lava
             destroy(enemy);
+            sceneState.hasDefeatedEnemy = true;
+        });
+
+        enemy.collides("airBlast", () => {
+            handleAirBlast(enemy);
         });
 
         if (enemy.health <= 0) {
             destroy(enemy);
+            sceneState.hasDefeatedEnemy = true;
             const explosion = add([...explosionComponents, color(1.0, 0.5, 0), pos(enemy.pos.x, enemy.pos.y)]);
             explosion.action(() => {
                 explosion.width++;
                 explosion.height++;
             });
-            score.value += enemy.scoreValue;
-            score.text = `Score: ${score.value}`;
+            PLAYER_STATE.score += enemy.scoreValue;
+            score.text = `Score: ${PLAYER_STATE.score}`;
             wait(0.125, () => {
                 destroy(explosion);
             });
@@ -308,75 +400,140 @@ function sceneSetup({ player, element, nextLevel }) {
         }
     });
 
+    every("lavaBubble", (lavaBubble) => {
+        lavaBubble.action(() => {
+            if (lavaBubble.canJump) {
+                // Create a bubble in the middle horizontally and slightly above the block
+                const bubble = add([rect(TILE_UNIT / 2, TILE_UNIT / 2), LAVA_BUBBLE_COLOR, pos(lavaBubble.pos.x + (TILE_UNIT / 4), lavaBubble.pos.y - (TILE_UNIT / 2)), body({ jumpForce: LAVA_BUBBLE_JUMP_FORCE })]);
+
+                bubble.collides("lavaBubble", () => {
+                    destroy(bubble);
+                });
+                bubble.collides("player", () => {
+                    PLAYER_STATE.health -= lavaBubble.strength;
+                    healthText = getPlayerHealth();
+                });
+                bubble.collides("enemy", () => {
+                    enemy.health -= lavaBubble.strength;
+                });
+
+                bubble.jump();
+
+                lavaBubble.canJump = false;
+
+                wait(1.5, () => {
+                    lavaBubble.canJump = true;
+                });
+            }
+        });
+    });
+
+    every("icicle", (icicle) => {
+        icicle.action(() => {
+            if (icicle.canFall && (icicle.pos.y < player.pos.y) && (Math.abs(icicle.pos.x - player.pos.x) < 5)) {
+                const icicleDrop = add([rect(TILE_UNIT / 2, TILE_UNIT), ICICLE_COLOR, pos(icicle.pos.x + (TILE_UNIT / 4), icicle.pos.y + 10), body({ maxVel: 200 })]);
+
+                icicleDrop.collides("player", () => {
+                    PLAYER_STATE.health -= icicle.strength;
+                    healthText.text = getPlayerHealth();
+                    destroy(icicleDrop);
+                });
+                icicleDrop.collides("enemy", () => {
+                    enemy.health -= icicle.strength;
+                    destroy(icicleDrop);
+                });
+                icicleDrop.collides("terrain", () => {
+                    destroy(icicleDrop);
+                });
+
+                icicle.canFall = false;
+
+                wait(1.5, () => {
+                    icicle.canFall = true;
+                });
+            }
+        });
+    });
+
     player.collides("goal", () => {
-        go(nextLevel, { lastElement: element });
+        go("interlude", { currentLevel, nextLevel, previousElement: element, ...sceneState });
     });
 
     player.collides("kill", () => {
         // Insta-kill the player (for things like lava and spikes)
-        go("gameOver", { returnScene: "one", lastElement: element });
+        go(currentLevel, { currentLevel, previousElement: element, hasRetried: true });
     });
 
     player.collides("crumblingBlock", (crumblingBlock) => {
         // Shrink the block vertically to show that it's breaking, then destroy it
-        action(() => crumblingBlock.height--);
+        action(() => {
+            if (crumblingBlock.height > 0) {
+                crumblingBlock.height--;
+            }
+        });
         wait(0.25, () => {
             destroy(crumblingBlock);
         })
     });
 
-    player.collides("airBoost", () => {
-        player.jump({ jumpForce: AIR_BOOST_FORCE });
+    player.collides("airBlast", () => {
+        handleAirBlast(player);
     });
 
     player.collides("ice", () => {
         if (player.grounded()) {
-            // TODO: Why doesn't this work?
             player.moveSpeed = PLAYER_MOVE_SPEED * 2;
+            player.isFreezing = true;
         }
     });
 
     player.collides("nonSlipperyTerrain", () => {
         if (player.grounded()) {
             player.moveSpeed = PLAYER_MOVE_SPEED;
+            player.isFreezing = false;
         }
     });
 
     player.collides("enemy", (enemy) => {
-        player.health -= enemy.strength;
-        healthText.text = getPlayerHealth(player);
+        PLAYER_STATE.health -= enemy.strength;
+        healthText.text = getPlayerHealth();
+        sceneState.tookDamage = true;
     });
 
     player.collides("ENEMY_BULLET", (bullet) => {
-        player.health -= bullet.strength;
-        healthText.text = getPlayerHealth(player);
+        PLAYER_STATE.health -= bullet.strength;
+        healthText.text = getPlayerHealth();
+        sceneState.tookDamage = true;
     });
 
     player.collides("boss", (boss) => {
-        player.health -= boss.strength;
-        healthText.text = getPlayerHealth(player);
+        PLAYER_STATE.health -= boss.strength;
+        healthText.text = getPlayerHealth();
     });
 
     player.collides("coin", (coin) => {
         destroy(coin);
-        score.value++;
-        score.text = `Score: ${score.value}`;
+        PLAYER_STATE.score++;
+        score.text = `Score: ${PLAYER_STATE.score}`;
+        sceneState.collectedItem = true;
     });
 
     player.collides("healthPotion", (potion) => {
         destroy(potion);
-        if (player.health + potion.strength < player.maxHealth) {
-            player.health += potion.strength;
+        if (PLAYER_STATE.health + potion.strength < PLAYER_STATE.maxHealth) {
+            PLAYER_STATE.health += potion.strength;
         } else {
-            player.health = player.maxHealth;
+            PLAYER_STATE.health = PLAYER_STATE.maxHealth;
         }
         healthText.text = getPlayerHealth(player);
+        sceneState.collectedItem = true;
     });
 
     player.collides("extraBoost", (extraBoost) => {
         destroy(extraBoost);
-        player.tempBoosts++;
+        PLAYER_STATE.tempBoosts++;
         boostText.text = getBoostIndicators(player);
+        sceneState.collectedItem = true;
     });
 
     player.collides("respawningExtraBoost", (respawningExtraBoost) => {
@@ -384,8 +541,9 @@ function sceneSetup({ player, element, nextLevel }) {
 
         destroy(respawningExtraBoost);
 
-        player.tempBoosts++;
+        PLAYER_STATE.tempBoosts++;
         boostText.text = getBoostIndicators(player);
+        sceneState.collectedItem = true;
 
         wait(5, () => {
             add([...respawningExtraBoostComponents, pos(itemPos.x, itemPos.y)]);
@@ -394,8 +552,8 @@ function sceneSetup({ player, element, nextLevel }) {
 
     player.on("grounded", () => {
         // If they boosted, give them their boost back when they hit the ground
-        if (player.numBoosts < player.maxBoosts) {
-            player.numBoosts++;
+        if (PLAYER_STATE.numBoosts < PLAYER_STATE.maxBoosts) {
+            PLAYER_STATE.numBoosts++;
         }
         // Update the UI indicator of the number of boosts available
         boostText.text = getBoostIndicators(player);
@@ -457,22 +615,20 @@ function sceneSetup({ player, element, nextLevel }) {
     keyDown(RIGHT, () => {
         // If they're boosting, ignore arrow keys
         if (!player.boostTarget) {
-            player.move(PLAYER_MOVE_SPEED, 0);
-            cameraSensor.move(PLAYER_MOVE_SPEED, 0);
+            player.move(player.moveSpeed, 0);
         }
     });
 
     keyDown(LEFT, () => {
         // If they're boosting, ignore arrow keys
         if (!player.boostTarget) {
-            player.move(-PLAYER_MOVE_SPEED, 0);
-            cameraSensor.move(-PLAYER_MOVE_SPEED, 0);
+            player.move(-player.moveSpeed, 0);
         }
     });
 
     keyPress(BOOST, () => {
         // if (player.canBoost) {
-        if ((player.numBoosts + player.tempBoosts) > 0) {
+        if ((PLAYER_STATE.numBoosts + PLAYER_STATE.tempBoosts) > 0) {
             if (keyIsDown(RIGHT)) {
                 if (keyIsDown(UP)) {
                     // If up and right are both pressed
@@ -523,10 +679,10 @@ function sceneSetup({ player, element, nextLevel }) {
             // Disable ALL gravity when boosting
             gravity(0);
             // player.canBoost = false;
-            if (player.numBoosts > 0) {
-                player.numBoosts--;
-            } else if (player.tempBoosts > 0) {
-                player.tempBoosts--;
+            if (PLAYER_STATE.numBoosts > 0) {
+                PLAYER_STATE.numBoosts--;
+            } else if (PLAYER_STATE.tempBoosts > 0) {
+                PLAYER_STATE.tempBoosts--;
             }
 
             // Update the UI indicator of the number of boosts available
@@ -542,8 +698,8 @@ function sceneSetup({ player, element, nextLevel }) {
 
     player.action(() => {
 
-        if (player.health <= 0) {
-            go("gameOver", { returnScene: "one" });
+        if (PLAYER_STATE.health <= 0) {
+            go(currentLevel, { currentLevel, previousElement: element, hasRetried: true });
         }
 
         if (player.boostTarget) {
@@ -556,15 +712,14 @@ function sceneSetup({ player, element, nextLevel }) {
             // Lerp 3 steps to boost target
             const nextPos = vec2(lerp(player.pos.x, player.boostTarget.x, 3), lerp(player.pos.y, player.boostTarget.y, 3));
             player.move(nextPos.x - player.pos.x, nextPos.y - player.pos.y);
-            cameraSensor.move(nextPos.x - player.pos.x, nextPos.y - player.pos.y);
         }
     });
 }
 
-function getPlayerHealth(player) {
+function getPlayerHealth() {
     // Create a * character for each boost available
     let health = '';
-    for (let i = 0; i < (player.health); i++) {
+    for (let i = 0; i < (PLAYER_STATE.health); i++) {
         health += '*';
     }
 
@@ -580,7 +735,7 @@ function getPlayerHealth(player) {
 function getBoostIndicators(player) {
     // Create a * character for each boost available
     let boostIndicators = '';
-    for (let i = 0; i < (player.numBoosts + player.tempBoosts); i++) {
+    for (let i = 0; i < (PLAYER_STATE.numBoosts + PLAYER_STATE.tempBoosts); i++) {
         boostIndicators += '*';
     }
 
@@ -596,9 +751,9 @@ scene("gameOver", ({ returnScene, lastElement }) => {
     });
 });
 
-scene("one", () => {
+scene("one", ({ previousElement }) => {
     const nextLevel = "two";
-    const element = getElement();
+    const element = getElement(previousElement);
     const map = addLevel([
         "==============================",
         "=                            =",
@@ -612,6 +767,7 @@ scene("one", () => {
         "====                     oooo=",
         "=                 o o    =====",
         "=              o  ====       =",
+        "=            o               =",
         "=P          o                =",
         "=================######=======",
         "                              ",
@@ -624,7 +780,7 @@ scene("one", () => {
 
     const player = addPlayer();
 
-    sceneSetup({ player, element, nextLevel });
+    sceneSetup({ player, element, currentLevel: "one", nextLevel });
 
     // Use the "playerStart" object from the map to set start position
     every("playerStart", (playerStart) => {
@@ -641,16 +797,16 @@ scene("two", ({ lastElement }) => {
         "=                                   %              =",
         "=                                   %              =",
         "=                                   %              =",
+        "=   !!                              %     ##       =",
         "=                                   %              =",
-        "=                                   %              =",
-        "=          oo           o           %     oo   S * =",
-        "=          ==          ===          ================",
+        "=          oo           o           %     oo     * =",
+        "=          ==          =!=          ================",
         "=                                                  =",
         "=                                                  =",
-        "=   ==                                             =",
-        "=                                                  =",
-        "= P     ooo             S      ooo                 =",
-        "================!!!!================================",
+        "=   ==###                     ooo                 =",
+        "=                             o   o                =",
+        "= P     ooo             S                          =",
+        "===============================###==================",
         "                                                    ",
         "                                                    ",
         "                                                    ",
@@ -661,7 +817,7 @@ scene("two", ({ lastElement }) => {
 
     const player = addPlayer();
 
-    sceneSetup({ player, element, nextLevel });
+    sceneSetup({ player, element, currentLevel: "two", nextLevel });
 
     // Use the "playerStart" object from the map to set start position
     every("playerStart", (playerStart) => {
@@ -670,4 +826,34 @@ scene("two", ({ lastElement }) => {
     });
 });
 
-start("one");
+scene("interlude", ({ currentLevel, previousElement, nextLevel, tookDamage, defeatedEnemy, collectedItem, retried }) => {
+    add([
+        text(`
+        Level ${currentLevel} complete!
+
+        Goom's log:
+
+        `, 10),
+        pos(10, 0)
+    ]);
+
+    const bragText = generateBragText({ tookDamage, defeatedEnemy, collectedItem, retried });
+
+    add([
+        text(`"${bragText}"`, 6),
+        pos(10, 100)
+    ]);
+
+    add([
+        text("Press ENTER to continue", 8),
+        pos(10, 150)
+    ]);
+
+    keyPress("enter", () => {
+        go(nextLevel, { previousElement });
+    });
+
+
+});
+
+start("one", {});
