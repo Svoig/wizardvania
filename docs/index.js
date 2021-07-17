@@ -12,6 +12,20 @@ const GOBLIN_JUMP_FORCE = 200;
 const AIR_BLAST_FORCE = 50;
 const LAVA_BUBBLE_JUMP_FORCE = 300;
 
+// See https://stackoverflow.com/questions/27078285/simple-throttle-in-js
+function throttle(cb, timeout) {
+    let waiting = false;
+    return () => {
+        if (!waiting) {
+            waiting = true;
+            cb();
+            setTimeout(() => {
+                waiting = false;
+            }, timeout);
+        }
+    }
+}
+
 
 kaboom({
     global: true,
@@ -228,6 +242,7 @@ const mapTokenConfig = (element) => ({
     "#": getHazardTerrainForElement(element), // Elemental Hazard Terrain
     "!": getHazardForElement(element),
     "@": [rect(TILE_UNIT, TILE_UNIT), color(0.1, 0.1, 0.1), solid(), "exitBlocker"], // Exit blockers
+    "+": [rect(TILE_UNIT, TILE_UNIT), METAL_SPIKE_COLOR, solid(), "kill", "spike"], // Metal spikes (non-elemental)
     // Collectibles & powerups
     "o": coinComponents, // Coin
     "P": ["playerStart"], // Player start
@@ -270,8 +285,14 @@ function addPlayer() {
     ]);
 }
 
-function sceneSetup({ player, element, currentLevel, nextLevel, hasRetried }) {
+function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried }) {
     PLAYER_STATE.health = PLAYER_STATE.maxHealth;
+
+    // Make obj default layer
+    layers([
+        "ui",
+        "obj"
+    ], "obj");
 
     const sceneState = {
         defeatedEnemy: false,
@@ -281,6 +302,9 @@ function sceneSetup({ player, element, currentLevel, nextLevel, hasRetried }) {
     };
     debug.showLog = true;
     gravity(GRAVITY);
+
+    // Leave the UI alone as the camer moves around
+    camIgnore(["ui"]);
 
     player.action(() => {
         camPos(player.pos.x, player.pos.y - 50);
@@ -295,39 +319,27 @@ function sceneSetup({ player, element, currentLevel, nextLevel, hasRetried }) {
         text(`Score: ${PLAYER_STATE.score}`, 8),
         color(1.0, 1.0, 0),
         pos(player.pos.x, player.pos.y - 100),
-        { value: 0 }
+        { value: 0 },
+        layer("ui")
     ]);
 
-    score.action(() => {
-        score.pos.x = player.pos.x - 200;
-        score.pos.y = player.pos.y - 175;
-    });
 
     const boostText = add([
         text(getBoostIndicators(player), 8),
         color(0, 1.0, 1.0),
         pos(score.pos.x + score.width + 25, score.pos.y),
-        { value: PLAYER_STATE.maxBoosts + PLAYER_STATE.tempBoosts }
+        { value: PLAYER_STATE.maxBoosts + PLAYER_STATE.tempBoosts },
+        layer("ui")
     ]);
-
-    boostText.action(() => {
-        // Set it to position of score text, shifted right by width of score text
-        // Setting directly using score.pos.x leads to staggered text movement
-        boostText.pos.x = player.pos.x - (200 - score.width) + 25;
-        boostText.pos.y = player.pos.y - 175;
-    });
 
     const healthText = add([
         text(getPlayerHealth(), 8),
         color(1.0, 0, 0),
         pos(boostText.pos.x + boostText.width + 25, boostText.pos.y),
-        { value: PLAYER_STATE.health }
+        { value: PLAYER_STATE.health },
+        layer("ui")
     ]);
 
-    healthText.action(() => {
-        healthText.pos.x = player.pos.x - (200 - score.width - boostText.width - 25) + 25;;
-        healthText.pos.y = player.pos.y - 175;
-    });
 
     // Use the "playerStart" object from the map to set start position
     every("playerStart", (playerStart) => {
@@ -542,11 +554,10 @@ function sceneSetup({ player, element, currentLevel, nextLevel, hasRetried }) {
 
     every("arachnos", (arachnos) => {
         let target = vec2(arachnos.pos.x + rand(-10, 10), arachnos.pos.y + rand(-10, 10));
-        let actionTimeout;
 
-        arachnos.overlaps("terrain", () => {
-            target = vec2(arachnos.pos.x + rand(-10, 10), arachnos.pos.y + rand(-10, 10));
-        });
+        // arachnos.overlaps("terrain", () => {
+        //     target = vec2(arachnos.pos.x + rand(-10, 10), arachnos.pos.y + rand(-10, 10));
+        // });
 
         arachnos.on("destroy", () => {
             const maxHealthUp = add([...maxHealthUpComponents, pos((width() / 2) + 10, height() / 2)]);
@@ -573,24 +584,33 @@ function sceneSetup({ player, element, currentLevel, nextLevel, hasRetried }) {
 
         let actionCounter = 0;
 
+        // arachnos.action(throttle(() => {
         arachnos.action(() => {
-            setTimeout(() => {
-                actionCounter++;
-                debug.log(actionCounter);
-                const distanceFromTarget = arachnos.pos.dist(target);
-                if (distanceFromTarget > CUTOFF_DISTANCE) {
-                    return;
-                } else if (distanceFromTarget < 5) {
-                    target = vec2(player.pos.x + rand(-50, 50), player.pos.y + rand(-50, 50));
-                } else {
-                    const directionX = arachnos.pos.x < target.x ? 1 : -1;
-                    const directionY = arachnos.pos.y < target.y ? 1 : -1;
-                    const speed = distanceFromTarget > 50 ? 100 : 10;
-                    arachnos.move(speed * directionX, speed * directionY);
-                }
-                clearTimeout(actionTimeout);
-            }, 250);
+            actionCounter++;
+            const distanceFromTarget = arachnos.pos.dist(target);
 
+            const distanceToRightBoundary = Math.abs(arachnos.pos.x - map.width());
+            const distanceToBottomBoundary = Math.abs(arachnos.pos.y - map.height());
+
+            if (distanceFromTarget > CUTOFF_DISTANCE) {
+                return;
+            } else if (
+                distanceFromTarget < 5 ||
+                distanceToRightBoundary < (arachnos.width * 2)
+                || arachnos.pos.x < (arachnos.width * 2)
+                || distanceToBottomBoundary < (arachnos.height * 2)
+                || arachnos.pos.y < (arachnos.height * 2)
+            ) {
+                // If we hit the target, or came close to the top or bottom or left or right world bounds
+                target = vec2(player.pos.x + rand(-50, 50), player.pos.y + rand(-50, 50));
+            }
+
+            const directionX = arachnos.pos.x < target.x ? 1 : -1;
+            const directionY = arachnos.pos.y < target.y ? 1 : -1;
+            const speed = distanceFromTarget > 50 ? 100 : 10;
+            arachnos.move(speed * directionX, speed * directionY);
+
+            // }, 250));
         });
     });
 
@@ -968,7 +988,11 @@ scene("one", ({ previousElement }) => {
 
     const player = addPlayer();
 
-    sceneSetup({ player, element, currentLevel: "one", nextLevel });
+    action(() => {
+        debug.log(debug.fps());
+    })
+
+    sceneSetup({ player, element, currentLevel: "one", nextLevel, map });
 
     // Use the "playerStart" object from the map to set start position
     every("playerStart", (playerStart) => {
@@ -1005,43 +1029,43 @@ scene("two", ({ previousElement }) => {
 
     const player = addPlayer();
 
-    sceneSetup({ player, element, currentLevel: "two", nextLevel });
+    sceneSetup({ player, element, currentLevel: "two", nextLevel, map });
 });
 
 scene("three", ({ previousElement }) => {
     const nextLevel = "four";
     const element = getElement(previousElement);
-    const map = addLevel([
-        "x=====================================x",
-        "x=   h  %          A          %  H   =x",
-        "x=%%%%%%%                     %%%%%%%=x",
-        "x=                                   =x",
-        "x=                                   =x",
-        "x=                                   =x",
-        "x=                                   =x",
-        "x=       =======      ========       =x",
-        "x=                                   =x",
-        "x=                                   =x",
-        "x=                                   =x",
-        "x=                                   =x",
-        "x=                                   =x",
-        "x========                    ========x",
-        "x=                                   =x",
-        "x=               @                   =x",
-        "x= P            @*@                  =x",
-        "x=====================================x",
-        "x                                     x",
-        "x                                     x",
-        "x                                     x",
-        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
 
-    ],
-        mapTokenConfig(element)
-    );
+    const map = addLevel([
+        "x=======================================x",
+        "x=                                     =x",
+        "x=                                     =x",
+        "x=                                     =x",
+        "x=                                     =x",
+        "x=  P                                  =x",
+        "x= ===                                 =x",
+        "x=                                     =x",
+        "x=                                     =x",
+        "x=  o                                  =x",
+        "x= ===                                 =x",
+        "x=                                     =x",
+        "x=                                     =x",
+        "x=            ++++++++++++++           =x",
+        "x=                                     =x",
+        "x=                                     =x",
+        "x=     =====                           =x",
+        "x=            ++###++###++#+           =x",
+        "x=+++++++++++++++++++++++++++++++++++++=x",
+        "x                                       x",
+        "x                                       x",
+        "x                                       x",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ], mapTokenConfig(element));
+
 
     const player = addPlayer();
 
-    sceneSetup({ player, element, currentLevel: "three", nextLevel });
+    sceneSetup({ player, element, currentLevel: "three", nextLevel, map });
 });
 
 scene("four", ({ previousElement }) => {
@@ -1077,7 +1101,7 @@ scene("four", ({ previousElement }) => {
 
     const player = addPlayer();
 
-    sceneSetup({ player, element, currentLevel: "four", nextLevel });
+    sceneSetup({ player, element, currentLevel: "four", nextLevel, map });
 });
 
 scene("interlude", ({ currentLevel, previousElement, nextLevel, tookDamage, defeatedEnemy, collectedItem, retried }) => {
@@ -1109,6 +1133,37 @@ scene("interlude", ({ currentLevel, previousElement, nextLevel, tookDamage, defe
 
 
 });
+
+// TODO: Add this back as level 3 if I can fix performance
+// Arachnos boss fight:
+// const map = addLevel([
+//     "x=====================================x",
+//     "x=   h  %          A          %  H   =x",
+//     "x=%%%%%%%                     %%%%%%%=x",
+//     "x=                                   =x",
+//     "x=                                   =x",
+//     "x=                                   =x",
+//     "x=                                   =x",
+//     "x=       =======      ========       =x",
+//     "x=                                   =x",
+//     "x=                                   =x",
+//     "x=                                   =x",
+//     "x=                                   =x",
+//     "x=                                   =x",
+//     "x========                    ========x",
+//     "x=                                   =x",
+//     "x=               @                   =x",
+//     "x= P            @*@                  =x",
+//     "x=====================================x",
+//     "x                                     x",
+//     "x                                     x",
+//     "x                                     x",
+//     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+
+// ],
+//     mapTokenConfig(element)
+// );
+
 
 const overrides = (window.location.search.match(/\?levelOverride=(\w*)(?:&elementOverride=(\w*)?)/));
 const levelOverride = (overrides || [])[1];
