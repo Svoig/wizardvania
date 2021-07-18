@@ -72,7 +72,7 @@ function generateBragText({ tookDamage, defeatedEnemy, collectedItem, retried })
         `As I stepped over the threshold into the chamber, I was filled with\ncomplete confidence in my exemplary skills and finesse.\n`,
         `This room was filled with horrific dangers the likes of which I\nhad never seen.\n`,
         `A dark, cavernous chamber loomed before me.\n`,
-        `Peering into the darkness, I wondered what treacherous traps lay ahead this time.\n`
+        `Peering into the darkness, I wondered what treacherous\ntraps lay ahead this time.\n`
     ];
 
     const tookDamageBrags = [
@@ -94,8 +94,8 @@ function generateBragText({ tookDamage, defeatedEnemy, collectedItem, retried })
     ];
 
     const concludingBrags = [
-        `One step closer... that treasure is mine!`,
-        `If the rest of the temple is this easy, I'll be home by lunch!`,
+        `Having risked life and limb, I am one step closer...\nthat treasure is mine!`,
+        `My life was hanging by a thread, but nothing could sway me from my quest!`,
         `Another exhilirating challenge, but of course it was no match for me!`
     ];
 
@@ -124,6 +124,10 @@ function generateBragText({ tookDamage, defeatedEnemy, collectedItem, retried })
  * @returns {string} The new element to be used in the level
  */
 const getElement = (lastElement) => {
+    // Return value from query param if present
+    if (elementOverride) {
+        return elementOverride;
+    }
     // Filter out the last element so you never get a back-to-back repeat
     const filteredElements = ELEMENTS.filter(e => e !== lastElement);
 
@@ -208,12 +212,12 @@ const breakCrate = (crate) => {
     destroy(crate);
 
     // Very rarely create an extra boost in the crate
-    if (Math.round(rand(0, 1000)) % 250 === 0) {
+    if (Math.round(rand(0, 1000)) % 100 === 0) {
         add([...extraBoostComponents, pos(crate.pos)]);
-    } else if (Math.round(rand(0, 1000)) % 100 === 0) {
+    } else if (Math.round(rand(0, 1000)) % 50 === 0) {
         // Less rarely add a major health potion
         add([...majorHealthPotionComponents, pos(crate.pos)]);
-    } else if (Math.round(rand(0, 1000)) % 25 === 0) {
+    } else if (Math.round(rand(0, 1000)) % 10 === 0) {
         // Even less rarely add a minor health potion
         add([...minorHealthPotionComponents, pos(crate.pos)]);
     } else if (Math.round(rand(0, 1000)) % 2 === 0) {
@@ -250,14 +254,15 @@ const mapTokenConfig = (element) => ({
     "§": respawningExtraBoostComponents, // Respawning Extra Boost powerup,
     "h": minorHealthPotionComponents, // Minor Health Potion
     "H": majorHealthPotionComponents, // Major Health Potion
-    // Enemies
-    "S": [rect(5, 5), color(0.25, 0.75, 0.95), { strength: 1, health: 1, scoreValue: 1 }, "slime", "enemy"],// Slime
-    "G": [rect(TILE_UNIT, TILE_UNIT), color(0, 1.0, 0), { strength: 1, health: 2, canShoot: true, scoreValue: 5 }, "goblin", "enemy"], // Goblin,
-    // Bosses
-    "A": [rect(TILE_UNIT * 2, TILE_UNIT * 2), color(0.45, 0.75, 0.45), { strength: 2, health: 10, scoreValue: 150 }, "arachnos", "enemy"], // Arachnos (Boss 1)
     // Permanent items
     "R": [rect(TILE_UNIT * 2, TILE_UNIT), color(0.15, 1.0, 0.15), "remoteControl"], // TODO: Is this a useful item?
-    "B": maxBoostUpComponents // Permanent extra boost
+    "B": ["maxBoostUpSpawner"], // Permanent extra boost spawner (conditionally added if player doesn't have it already)
+    "U": maxHealthUpComponents, // Permanent extra heart
+    // Enemies
+    "S": [rect(TILE_UNIT, TILE_UNIT / 2), color(0.25, 0.75, 0.95), body(), { strength: 1, health: 1, scoreValue: 1 }, "slime", "enemy"],// Slime
+    "G": [rect(TILE_UNIT, TILE_UNIT), color(0, 1.0, 0), body({ jumpForce: GOBLIN_JUMP_FORCE }), { strength: 1, health: 2, canShoot: true, scoreValue: 5 }, "goblin", "enemy"], // Goblin,
+    // Bosses
+    "A": [rect(TILE_UNIT * 2, TILE_UNIT * 2), color(0.45, 0.75, 0.45), { strength: 2, health: 10, scoreValue: 150 }, "arachnos", "enemy"], // Arachnos (Boss 1)
 });
 
 function addPlayer() {
@@ -285,7 +290,10 @@ function addPlayer() {
     ]);
 }
 
-function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried }) {
+function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried, targetMaxBoosts }) {
+    if (elementOverride) {
+        debug.log(elementOverride);
+    }
     PLAYER_STATE.health = PLAYER_STATE.maxHealth;
 
     // Make obj default layer
@@ -303,8 +311,6 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
     debug.showLog = true;
     gravity(GRAVITY);
 
-    // Leave the UI alone as the camer moves around
-    camIgnore(["ui"]);
 
     player.action(() => {
         camPos(player.pos.x, player.pos.y - 50);
@@ -318,7 +324,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
     const score = add([
         text(`Score: ${PLAYER_STATE.score}`, 8),
         color(1.0, 1.0, 0),
-        pos(player.pos.x, player.pos.y - 100),
+        pos(0, 0),
         { value: 0 },
         layer("ui")
     ]);
@@ -327,7 +333,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
     const boostText = add([
         text(getBoostIndicators(player), 8),
         color(0, 1.0, 1.0),
-        pos(score.pos.x + score.width + 25, score.pos.y),
+        pos(150, 0),
         { value: PLAYER_STATE.maxBoosts + PLAYER_STATE.tempBoosts },
         layer("ui")
     ]);
@@ -335,10 +341,13 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
     const healthText = add([
         text(getPlayerHealth(), 8),
         color(1.0, 0, 0),
-        pos(boostText.pos.x + boostText.width + 25, boostText.pos.y),
+        pos(300, 0),
         { value: PLAYER_STATE.health },
         layer("ui")
     ]);
+
+    // Leave the UI alone as the camer moves around
+    camIgnore(["ui"]);
 
 
     // Use the "playerStart" object from the map to set start position
@@ -350,10 +359,8 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
     every("enemy", (enemy) => {
         enemy.collides("PLAYER_BULLET", () => {
             enemy.health -= player.strength;
-        })
-    });
+        });
 
-    action("enemy", (enemy) => {
         enemy.collides("kill", () => {
             // TODO: Let fire enemies walk on lava
             destroy(enemy);
@@ -363,7 +370,9 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
         enemy.collides("airBlast", () => {
             handleAirBlast(enemy);
         });
+    });
 
+    action("enemy", (enemy) => {
         if (enemy.health <= 0) {
             destroy(enemy);
             sceneState.defeatedEnemy = true;
@@ -377,6 +386,12 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
             wait(0.125, () => {
                 destroy(explosion);
             });
+        }
+    });
+
+    every("maxBoostUpSpawner", (maxBoostUpSpawner) => {
+        if (PLAYER_STATE.maxBoosts < targetMaxBoosts) {
+            add([...maxBoostUpComponents, pos(maxBoostUpSpawner.pos)]);
         }
     });
 
@@ -438,11 +453,15 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
     });
 
     every("slime", (slime) => {
-        slime.action(() => {
-            if (slime.pos.dist(player.pos) <= CUTOFF_DISTANCE) {
-                slime.move(-20, 0);
-            }
-        });
+        try {
+            slime.action(() => {
+                if (slime.pos.dist(player.pos) <= CUTOFF_DISTANCE) {
+                    slime.move(-20, 0);
+                }
+            });
+        } catch (e) {
+            debug.log(e.message);
+        }
     });
 
     every("lavaBubble", (lavaBubble) => {
@@ -484,8 +503,9 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
     });
 
     every("icicle", (icicle) => {
-        icicle.action(() => {
+        icicle.action(async () => {
             if (icicle.canFall && (icicle.pos.y < player.pos.y) && (Math.abs(icicle.pos.x - player.pos.x) < 5)) {
+                await wait(0.25);
                 const icicleDrop = add([rect(TILE_UNIT / 2, TILE_UNIT), ICICLE_COLOR, pos(icicle.pos.x + (TILE_UNIT / 4), icicle.pos.y + 10), body({ maxVel: 200 })]);
 
                 icicleDrop.collides("player", () => {
@@ -553,32 +573,19 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
     });
 
     every("arachnos", (arachnos) => {
-        let target = vec2(arachnos.pos.x + rand(-10, 10), arachnos.pos.y + rand(-10, 10));
+        let target = vec2(player.pos.x + rand(-10, 10), player.pos.y + rand(-10, 10));
 
-        // arachnos.overlaps("terrain", () => {
-        //     target = vec2(arachnos.pos.x + rand(-10, 10), arachnos.pos.y + rand(-10, 10));
-        // });
+        arachnos.overlaps("terrain", () => {
+            target = vec2(player.pos.x + rand(-10, 10), player.pos.y + rand(-10, 10));
+        });
 
         arachnos.on("destroy", () => {
-            const maxHealthUp = add([...maxHealthUpComponents, pos((width() / 2) + 10, height() / 2)]);
-            const maxBoostUp = add([...maxBoostUpComponents, pos((width() / 2) - 10, height() / 2)]);
+            add([...maxHealthUpComponents, pos((width() / 2) + 10, height() / 2)]);
+            add([...maxBoostUpComponents, pos((width() / 2) - 10, height() / 2)]);
 
             // Open the way to the exit
             every("exitBlocker", (exitBlocker) => {
                 destroy(exitBlocker);
-            });
-
-            maxHealthUp.collides("player", () => {
-                PLAYER_STATE.maxHealth++;
-                PLAYER_STATE.health = PLAYER_STATE.maxHealth;
-                healthText.text = getPlayerHealth();
-                destroy(maxHealthUp);
-            });
-
-            maxBoostUp.collides("player", () => {
-                PLAYER_STATE.maxBoosts++;
-                PLAYER_STATE.numBoosts = PLAYER_STATE.maxBoosts;
-                destroy(maxBoostUp);
             });
         });
 
@@ -588,26 +595,34 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
         arachnos.action(() => {
             actionCounter++;
             const distanceFromTarget = arachnos.pos.dist(target);
+            const distanceFromPlayer = arachnos.pos.dist(player.pos);
 
-            const distanceToRightBoundary = Math.abs(arachnos.pos.x - map.width());
-            const distanceToBottomBoundary = Math.abs(arachnos.pos.y - map.height());
-
-            if (distanceFromTarget > CUTOFF_DISTANCE) {
+            
+            if (distanceFromPlayer > CUTOFF_DISTANCE) {
                 return;
-            } else if (
-                distanceFromTarget < 5 ||
-                distanceToRightBoundary < (arachnos.width * 2)
-                || arachnos.pos.x < (arachnos.width * 2)
-                || distanceToBottomBoundary < (arachnos.height * 2)
-                || arachnos.pos.y < (arachnos.height * 2)
-            ) {
-                // If we hit the target, or came close to the top or bottom or left or right world bounds
-                target = vec2(player.pos.x + rand(-50, 50), player.pos.y + rand(-50, 50));
             }
+            
+            if (distanceFromTarget < arachnos.width) {
+                target = vec2(player.pos.x + rand(-100, 100), player.pos.y + rand(-100, 100));
+            }
+            
+            // TODO: Don't need this if terrain collisions aren't laggy
+            // const distanceToRightBoundary = Math.abs(arachnos.pos.x - map.width());
+            // const distanceToBottomBoundary = Math.abs(arachnos.pos.y - map.height());
+            //  else if (
+            //     distanceFromTarget < 5 ||
+            //     distanceToRightBoundary < (arachnos.width * 2)
+            //     || arachnos.pos.x < (arachnos.width * 2)
+            //     || distanceToBottomBoundary < (arachnos.height * 2)
+            //     || arachnos.pos.y < (arachnos.height * 2)
+            // ) {
+            //     // If we hit the target, or came close to the top or bottom or left or right world bounds
+            //     target = vec2(player.pos.x + rand(-50, 50), player.pos.y + rand(-50, 50));
+            // }
 
             const directionX = arachnos.pos.x < target.x ? 1 : -1;
             const directionY = arachnos.pos.y < target.y ? 1 : -1;
-            const speed = distanceFromTarget > 50 ? 100 : 10;
+            const speed = distanceFromPlayer > 50 ? 100 : 10;
             arachnos.move(speed * directionX, speed * directionY);
 
             // }, 250));
@@ -704,9 +719,17 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried 
     player.collides("maxBoostUp", (maxBoostUp) => {
         destroy(maxBoostUp);
         PLAYER_STATE.maxBoosts++;
-        PLAYER_STATE.numBoosts++;
+        PLAYER_STATE.numBoosts = PLAYER_STATE.maxBoosts;
         boostText.text = getBoostIndicators(player);
         sceneState.collectedItem = true;
+    });
+
+    player.collides("maxHealthUp", (maxHealthUp) => {
+        PLAYER_STATE.maxHealth++;
+        PLAYER_STATE.health = PLAYER_STATE.maxHealth;
+        healthText.text = getPlayerHealth();
+        sceneState.collectedItem = true;
+        destroy(maxHealthUp);
     });
 
     player.collides("respawningExtraBoost", (respawningExtraBoost) => {
@@ -988,10 +1011,6 @@ scene("one", ({ previousElement }) => {
 
     const player = addPlayer();
 
-    action(() => {
-        debug.log(debug.fps());
-    })
-
     sceneSetup({ player, element, currentLevel: "one", nextLevel, map });
 
     // Use the "playerStart" object from the map to set start position
@@ -1016,8 +1035,8 @@ scene("two", ({ previousElement }) => {
         "x======                    !!                                           =x",
         "x=              ========                                                =x",
         "x=               !!!!!!                             ooo             %%% =x",
-        "x=                                                 o   o            %%% =x",
-        "x= P                                                                %%% =x",
+        "x=                                                 o   o            %h% =x",
+        "x= P      S                                                   G     %%% =x",
         "x==========######!!!!!!######=======================###==================x",
         "x                                                                        x",
         "x                                                                        x",
@@ -1034,42 +1053,83 @@ scene("two", ({ previousElement }) => {
 
 scene("three", ({ previousElement }) => {
     const nextLevel = "four";
+
+    const element = getElement(previousElement);
+
+    const player = addPlayer();
+
+    // Arachnos boss fight:
+    const map = addLevel([
+        "x=====================================x",
+        "x=   h  %          A          %  H   =x",
+        "x=%%%%%%%                     %%%%%%%=x",
+        "x=                                   =x",
+        "x=                                   =x",
+        "x=                                   =x",
+        "x=                                   =x",
+        "x=       ==###==      ==###==        =x",
+        "x=                                   =x",
+        "x=                                   =x",
+        "x=                                   =x",
+        "x=                                   =x",
+        "x=                                   =x",
+        "x========                     ========x",
+        "x=              @@@@@                =x",
+        "x=              @ * @                =x",
+        "x= P            @@@@@                =x",
+        "x=====================================x",
+        "x                                     x",
+        "x                                     x",
+        "x                                     x",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+
+    ],
+        mapTokenConfig(element)
+    );
+
+    sceneSetup({ player, element, currentLevel: "three", nextLevel, map });
+});
+
+scene("four", ({ previousElement, targetMaxBoosts = 2 }) => {
+    const nextLevel = "five";
     const element = getElement(previousElement);
 
     const map = addLevel([
-        "x=======================================x",
-        "x=                                     =x",
-        "x=                                     =x",
-        "x=                                     =x",
-        "x=                                     =x",
-        "x=  P                                  =x",
-        "x= ===                                 =x",
-        "x=                                     =x",
-        "x=                                     =x",
-        "x=  o                                  =x",
-        "x= ===                                 =x",
-        "x=                                     =x",
-        "x=                                     =x",
-        "x=            ++++++++++++++           =x",
-        "x=                                     =x",
-        "x=                                     =x",
-        "x=     =====                           =x",
-        "x=            ++###++###++#+           =x",
-        "x=+++++++++++++++++++++++++++++++++++++=x",
-        "x                                       x",
-        "x                                       x",
-        "x                                       x",
-        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        "x============================================x",
+        "x=                                          =x",
+        "x=                                  ^       =x",
+        "x=                                 ===      =x",
+        "x=                                          =x",
+        "x=  P                                       =x",
+        "x= ===                                      =x",
+        "x=                                          =x",
+        "x=                                          =x",
+        "x=   o                    o                 =x",
+        "x=  ===                   =                 =x",
+        "x=                                          =x",
+        "x=            ++++++++++++++++++++++++++++++=x",
+        "x=                                          =x",
+        "x=                                          =x",
+        "x=     =====                                =x",
+        "x=                                          =x",
+        "x=            ++###++###++#+   ===       *  =x",
+        "x=                                          =x",
+        "x=                                #####+++++=x",
+        "x=++++++++++++++++++++++++++++++++++++++++++=x",
+        "x                                            x",
+        "x                                            x",
+        "x                                            x",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
     ], mapTokenConfig(element));
 
 
     const player = addPlayer();
 
-    sceneSetup({ player, element, currentLevel: "three", nextLevel, map });
+    sceneSetup({ player, element, currentLevel: "four", nextLevel, map, targetMaxBoosts });
 });
 
-scene("four", ({ previousElement }) => {
-    const nextLevel = "five";
+scene("five", ({ previousElement }) => {
+    const nextLevel = "six";
     const element = getElement(previousElement);
     const map = addLevel([
         "x===================================================================x",
@@ -1080,16 +1140,16 @@ scene("four", ({ previousElement }) => {
         "x=                                                                 =x",
         "x=                                                       !!!       =x",
         "x=                                                                 =x",
-        "x=                           ##########                     #######=x",
+        "x=                  ======   ##########                     #######=x",
         "x=                                                                 =x",
         "x=                                                                 =x",
-        "x=               ======                                            =x",
         "x=                                                                 =x",
+        "x=         ===                                                     =x",
         "x=                             ####################################=x",
-        "x=                             #                                   =x",
-        "x=                             #                                   =x",
-        "x= P                           #                                 * =x",
-        "x=====############========######!!!!!!######################========x",
+        "x=    +++      +++   %         #                                   =x",
+        "x=                  % %        #                                   =x",
+        "x= P               % % %       #                                 * =x",
+        "x=====###!!!!!!###========######!!!!!!######################========x",
         "x                                                                   x",
         "x                                                                   x",
         "x                                                                   x",
@@ -1101,7 +1161,7 @@ scene("four", ({ previousElement }) => {
 
     const player = addPlayer();
 
-    sceneSetup({ player, element, currentLevel: "four", nextLevel, map });
+    sceneSetup({ player, element, currentLevel: "five", nextLevel, map });
 });
 
 scene("interlude", ({ currentLevel, previousElement, nextLevel, tookDamage, defeatedEnemy, collectedItem, retried }) => {
@@ -1109,7 +1169,7 @@ scene("interlude", ({ currentLevel, previousElement, nextLevel, tookDamage, defe
         text(`
         Level ${currentLevel} complete!
 
-        Goom's log:
+        Thief's log:
 
         `, 10),
         pos(10, 0)
@@ -1134,35 +1194,7 @@ scene("interlude", ({ currentLevel, previousElement, nextLevel, tookDamage, defe
 
 });
 
-// TODO: Add this back as level 3 if I can fix performance
-// Arachnos boss fight:
-// const map = addLevel([
-//     "x=====================================x",
-//     "x=   h  %          A          %  H   =x",
-//     "x=%%%%%%%                     %%%%%%%=x",
-//     "x=                                   =x",
-//     "x=                                   =x",
-//     "x=                                   =x",
-//     "x=                                   =x",
-//     "x=       =======      ========       =x",
-//     "x=                                   =x",
-//     "x=                                   =x",
-//     "x=                                   =x",
-//     "x=                                   =x",
-//     "x=                                   =x",
-//     "x========                    ========x",
-//     "x=                                   =x",
-//     "x=               @                   =x",
-//     "x= P            @*@                  =x",
-//     "x=====================================x",
-//     "x                                     x",
-//     "x                                     x",
-//     "x                                     x",
-//     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
 
-// ],
-//     mapTokenConfig(element)
-// );
 
 
 const overrides = (window.location.search.match(/\?levelOverride=(\w*)(?:&elementOverride=(\w*)?)/));
