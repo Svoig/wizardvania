@@ -35,6 +35,22 @@ kaboom({
     clearColor: [0, 0, 0, 1],
 });
 
+const FIRE = "fire";
+const WATER = "water";
+const EARTH = "earth";
+const AIR = "air";
+const NONE = "none"; // Just for player gun
+
+const ELEMENTS = [FIRE, WATER, EARTH, AIR];
+
+const spellNames = {
+    [FIRE]: "Fireball",
+    [WATER]: "Ice spear",
+    [EARTH]: "Boulder",
+    [AIR]: "Tornado",
+    [NONE]: "Crossbow"
+}
+
 const PLAYER_STATE = {
     color: color(1.0, 0, 0),
     health: 3,
@@ -46,15 +62,9 @@ const PLAYER_STATE = {
     score: 0,
     direction: 1, // Aiming direction. 1 for right, -1 for left
     hasRemoteControl: false,
+    ammoElement: NONE,
+    availableAmmos: [NONE],
 };
-
-
-const FIRE = "fire";
-const WATER = "water";
-const EARTH = "earth";
-const AIR = "air";
-
-const ELEMENTS = [FIRE, WATER, EARTH, AIR];
 
 // COLORS
 const TERRAIN_COLOR_FIRE = color();
@@ -185,8 +195,11 @@ const LEFT = "a";
 const SHOOT = "space";
 const BOOST = "shift";
 const AIM = "/";
+const AMMO_CYCLE_BACK = ["up", "left"];
+const AMMO_CYCLE_FORWARD = ["down", "right"];
 
 // Reusable components for creating things dynamically
+const goalComponents = [rect(TILE_UNIT / 2, TILE_UNIT / 2), origin("center"), "goal"];
 const respawningExtraBoostComponents = [rect(5, 5), color(1.0, 0, 1.0), "respawningExtraBoost"];
 const explosionComponents = [rect(TILE_UNIT, TILE_UNIT), color(1, 1, 1), origin("center"), "explosion"];
 const coinComponents = [rect(5, 5), color(1.0, 1.0, 0), "coin"];
@@ -237,7 +250,7 @@ const mapTokenConfig = (element) => ({
     height: TILE_UNIT,
     pos: vec2(0, 0),
     // End of level goal
-    "*": [rect(TILE_UNIT / 2, TILE_UNIT / 2), origin("center"), "goal"],
+    "*": goalComponents, // Goal
     // Terrain & hazards
     // TODO: Change colors based on element
     "x": [rect(TILE_UNIT, TILE_UNIT), color(0, 0, 0, 0), "outOfBounds", "kill"], // Kill the player if they go out of bounds (like in a pit)
@@ -343,6 +356,13 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
         color(1.0, 0, 0),
         pos(300, 0),
         { value: PLAYER_STATE.health },
+        layer("ui")
+    ]);
+
+    const ammoText = add([
+        text(`Weapon: ${spellNames[PLAYER_STATE.ammoElement]}`, 8),
+        color(1.0, 1.0, 0),
+        pos(0, 20),
         layer("ui")
     ]);
 
@@ -580,13 +600,46 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
         });
 
         arachnos.on("destroy", () => {
-            add([...maxHealthUpComponents, pos((width() / 2) + 10, height() / 2)]);
-            add([...maxBoostUpComponents, pos((width() / 2) - 10, height() / 2)]);
+            const lastArachnosPos = arachnos.pos;
+            const collectedRewards = [];
+            const maxHealthUp = add([...maxHealthUpComponents, pos((width() / 2), 100)]);
+            const maxBoostUp = add([...maxBoostUpComponents, pos((width() / 2) - 40, 100)]);
+            const earthGun = add([rect(TILE_UNIT * 2, TILE_UNIT), EARTH_SPIKE_COLOR, pos((width() / 2) - 80, 100), "earthGun"]);
 
-            // Open the way to the exit
-            every("exitBlocker", (exitBlocker) => {
-                destroy(exitBlocker);
+
+            for (let i = 0; i < 10; i++) {
+                add([...coinComponents, pos((width() / 2) - (80 - (i * 10)), 100)]);
+            }
+
+            earthGun.collides("player", () => {
+                PLAYER_STATE.availableAmmos.push(EARTH);
+                destroy(earthGun);
             });
+
+            maxHealthUp.collides("player", () => {
+                collectedRewards.push("maxHealthUp");
+                debug.log("Rewards? " + collectedRewards.length);
+
+                if (!maxBoostUp.exists()) {
+                    add([...goalComponents, pos((width() / 2) - 80, 80)]);
+                }
+
+                destroy(maxHealthUp);
+
+            });
+
+            maxBoostUp.collides("player", () => {
+                collectedRewards.push("maxBoostUp");
+                debug.log("Rewards? " + collectedRewards.length);
+                if (!maxHealthUp.exists()) {
+                    add([...goalComponents, pos(lastArachnosPos)]);
+                }
+
+                destroy(maxBoostUp);
+
+            });
+
+
         });
 
         let actionCounter = 0;
@@ -597,15 +650,15 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
             const distanceFromTarget = arachnos.pos.dist(target);
             const distanceFromPlayer = arachnos.pos.dist(player.pos);
 
-            
+
             if (distanceFromPlayer > CUTOFF_DISTANCE) {
                 return;
             }
-            
+
             if (distanceFromTarget < arachnos.width) {
                 target = vec2(player.pos.x + rand(-100, 100), player.pos.y + rand(-100, 100));
             }
-            
+
             // TODO: Don't need this if terrain collisions aren't laggy
             // const distanceToRightBoundary = Math.abs(arachnos.pos.x - map.width());
             // const distanceToBottomBoundary = Math.abs(arachnos.pos.y - map.height());
@@ -717,11 +770,11 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
     });
 
     player.collides("maxBoostUp", (maxBoostUp) => {
-        destroy(maxBoostUp);
         PLAYER_STATE.maxBoosts++;
         PLAYER_STATE.numBoosts = PLAYER_STATE.maxBoosts;
         boostText.text = getBoostIndicators(player);
         sceneState.collectedItem = true;
+        destroy(maxBoostUp);
     });
 
     player.collides("maxHealthUp", (maxHealthUp) => {
@@ -903,6 +956,26 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
         }
     });
 
+    keyPress(AMMO_CYCLE_BACK, () => {
+        if (PLAYER_STATE.availableAmmos.length > 1) {
+            const currentIndex = PLAYER_STATE.availableAmmos.indexOf(PLAYER_STATE.ammoElement);
+            const nextIndex = currentIndex - 1 > 0 ? currentIndex - 1 : PLAYER_STATE.availableAmmos.length;
+            PLAYER_STATE.ammoElement = PLAYER_STATE.availableAmmos[nextIndex];
+
+            ammoText.text = `Weapon: ${spellNames[PLAYER_STATE.ammoElement]}`;
+        }
+    });
+
+    keyPress(AMMO_CYCLE_FORWARD, () => {
+        if (PLAYER_STATE.availableAmmos.length > 1) {
+            const currentIndex = PLAYER_STATE.availableAmmos.indexOf(PLAYER_STATE.ammoElement);
+            const nextIndex = currentIndex + 1 < PLAYER_STATE.availableAmmos.length ? currentIndex + 1 : 0;
+            PLAYER_STATE.ammoElement = PLAYER_STATE.availableAmmos[nextIndex];
+
+            ammoText.text = `Weapon: ${spellNames[PLAYER_STATE.ammoElement]}`;
+        }
+    });
+
     player.action(() => {
 
         if (PLAYER_STATE.health <= 0) {
@@ -1036,7 +1109,7 @@ scene("two", ({ previousElement }) => {
         "x=              ========                                                =x",
         "x=               !!!!!!                             ooo             %%% =x",
         "x=                                                 o   o            %h% =x",
-        "x= P      S                                                   G     %%% =x",
+        "x= P      S                            h                      G     %%% =x",
         "x==========######!!!!!!######=======================###==================x",
         "x                                                                        x",
         "x                                                                        x",
@@ -1054,30 +1127,32 @@ scene("two", ({ previousElement }) => {
 scene("three", ({ previousElement }) => {
     const nextLevel = "four";
 
-    const element = getElement(previousElement);
+    // const element = getElement(previousElement);
+    // Arachnos is the Earth boss! His lair is always earth
+    const element = EARTH;
 
     const player = addPlayer();
 
     // Arachnos boss fight:
     const map = addLevel([
         "x=====================================x",
-        "x=   h  %          A          %  H   =x",
+        "x= o h o%          A          %o H o =x",
         "x=%%%%%%%                     %%%%%%%=x",
         "x=                                   =x",
         "x=                                   =x",
         "x=                                   =x",
         "x=                                   =x",
-        "x=       ==###==      ==###==        =x",
+        "x=       ==###==       ==###==       =x",
         "x=                                   =x",
         "x=                                   =x",
         "x=                                   =x",
+        "x=           #####===#####           =x",
         "x=                                   =x",
+        "x========     !!!!###!!!!    =========x",
         "x=                                   =x",
-        "x========                     ========x",
-        "x=              @@@@@                =x",
-        "x=              @ * @                =x",
-        "x= P            @@@@@                =x",
-        "x=====================================x",
+        "x=                             %   % =x",
+        "x= P                          %o% %o%=x",
+        "x===========###############===========x",
         "x                                     x",
         "x                                     x",
         "x                                     x",
