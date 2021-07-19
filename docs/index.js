@@ -602,9 +602,9 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
         arachnos.on("destroy", () => {
             const lastArachnosPos = arachnos.pos;
             const collectedRewards = [];
-            const maxHealthUp = add([...maxHealthUpComponents, pos((width() / 2), 100)]);
-            const maxBoostUp = add([...maxBoostUpComponents, pos((width() / 2) - 40, 100)]);
-            const earthGun = add([rect(TILE_UNIT * 2, TILE_UNIT), EARTH_SPIKE_COLOR, pos((width() / 2) - 80, 100), "earthGun"]);
+            const maxHealthUp = add([...maxHealthUpComponents, pos((map.width() / 2), 100)]);
+            const maxBoostUp = add([...maxBoostUpComponents, pos((map.width() / 2) - 40, 100)]);
+            const earthGun = add([rect(TILE_UNIT * 2, TILE_UNIT), EARTH_SPIKE_COLOR, pos((map.width() / 2) - 80, 100), "earthGun"]);
 
 
             for (let i = 0; i < 10; i++) {
@@ -621,7 +621,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                 debug.log("Rewards? " + collectedRewards.length);
 
                 if (!maxBoostUp.exists()) {
-                    add([...goalComponents, pos((width() / 2) - 80, 80)]);
+                    add([...goalComponents, pos((map.width() / 2) - 80, 80)]);
                 }
 
                 destroy(maxHealthUp);
