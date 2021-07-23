@@ -2,6 +2,7 @@ const GAME_SCALE = 3;
 const CUTOFF_DISTANCE = 500;
 
 const BULLET_SPEED = 300;
+const VORTEX_SPEED = 25;
 const PLAYER_MOVE_SPEED = 125;
 const PLAYER_BOOST_SPEED = 200;
 const PLAYER_JUMP_FORCE = 250;
@@ -11,6 +12,10 @@ const GRAVITY = 980;
 const GOBLIN_JUMP_FORCE = 200;
 const AIR_BLAST_FORCE = 50;
 const LAVA_BUBBLE_JUMP_FORCE = 300;
+const BULLET_STRENGTH = 1;
+const BOULDER_STRENGTH = 2;
+
+const STATUS_TIMEOUT = 2;
 
 // See https://stackoverflow.com/questions/27078285/simple-throttle-in-js
 function throttle(cb, timeout) {
@@ -34,6 +39,8 @@ kaboom({
     debug: true,
     clearColor: [0, 0, 0, 1],
 });
+
+loadSprite("status", "status.png");
 
 const FIRE = "fire";
 const WATER = "water";
@@ -64,6 +71,10 @@ const PLAYER_STATE = {
     hasRemoteControl: false,
     ammoElement: NONE,
     availableAmmos: [NONE],
+    // Status effects
+    isRockShocked: false,
+    isFreezing: false,
+    isBurning: false,
 };
 
 // COLORS
@@ -75,6 +86,47 @@ const LAVA_BUBBLE_COLOR = color(0.85, 0.25, 0.0);
 const ICICLE_COLOR = color(0, 0.25, 0.85);
 const EARTH_SPIKE_COLOR = color(0.25, 0.25, 0);
 const METAL_SPIKE_COLOR = color(0.25, 0.25, 0.25);
+const BOULDER_COLOR = color(0.55, 0.35, 0.35);
+const FIREBALL_COLOR = color(0.75, 0.2, 0.2);
+const VORTEX_COLOR = color(0.85, 0.85, 0.85);
+const ICE_LANCE_COLOR = color(0, 0, 1);
+
+function createStatusIndicator(color, parent) {
+    const indicator = add([
+        // sprite("status"),
+        rect(TILE_UNIT, TILE_UNIT),
+        origin("center"),
+        pos(parent.pos.x - (TILE_UNIT / 2),
+            parent.pos.y - (TILE_UNIT / 2)),
+        color,
+        layer("effects")
+    ]);
+
+    let direction = 1;
+
+    indicator.action(() => {
+        indicator.pos = parent.pos;
+
+        indicator.width += 0.1 * direction;
+        indicator.height += 0.1 * direction;
+
+        if (indicator.height > TILE_UNIT * 1.5) {
+            direction = -1;
+        } else if (indicator.height < 0.25) {
+            direction = 1;
+        }
+
+        if (!parent.exists()) {
+            destroy(indicator);
+        }
+    });
+
+    wait(STATUS_TIMEOUT, () => {
+        destroy(indicator);
+    })
+
+    return indicator;
+}
 
 
 function generateBragText({ tookDamage, defeatedEnemy, collectedItem, retried }) {
@@ -157,6 +209,32 @@ const getTerrainColorForElement = (element) => {
     }
 }
 
+const getElementalColor = (element) => {
+    switch (element) {
+        case FIRE:
+            return color(0.65, 0.1, 0.1);
+        case WATER:
+            return color(0.1, 0.1, 0.65);
+        case EARTH:
+            return color(0.45, 0.25, 0.25);
+        case AIR:
+            return color(0.65, 0.65, 0.65);
+    }
+}
+
+const getElementalResistanceTag = (element) => {
+    switch (element) {
+        case FIRE:
+            return "fireproof";
+        case WATER:
+            return "iceproof";
+        case EARTH:
+            return "boulderproof";
+        case AIR:
+            return "vortexproof";
+    }
+}
+
 const getHazardTerrainForElement = (element) => {
     switch (element) {
         case FIRE:
@@ -175,7 +253,7 @@ const getHazardTerrainForElement = (element) => {
 const getHazardForElement = (element) => {
     switch (element) {
         case FIRE:
-            return [rect(TILE_UNIT, TILE_UNIT), LAVA_BUBBLE_COLOR, "lavaBubble", "kill", { canJump: true, strength: 1 }];
+            return [rect(TILE_UNIT, TILE_UNIT), LAVA_BUBBLE_COLOR, "ember", solid(), { canJump: true, strength: 1 }];
         case WATER:
             return [rect(TILE_UNIT, TILE_UNIT), ICICLE_COLOR, solid(), "icicle", "ice", { canFall: true, strength: 1 }];
         case EARTH:
@@ -194,7 +272,7 @@ const DOWN = "s";
 const LEFT = "a";
 const SHOOT = "space";
 const BOOST = "shift";
-const AIM = "/";
+const AIM = ".";
 const AMMO_CYCLE_BACK = ["up", "left"];
 const AMMO_CYCLE_FORWARD = ["down", "right"];
 
@@ -208,6 +286,11 @@ const majorHealthPotionComponents = [rect(TILE_UNIT, TILE_UNIT), color(1.0, 0, 0
 const minorHealthPotionComponents = [rect(5, 5), color(1.0, 0, 0.5), body(), { strength: 1 }, "minorHealthPotion", "healthPotion", "potion"];
 const maxHealthUpComponents = [rect(TILE_UNIT * 2, TILE_UNIT), color(1.0, 0, 0), "maxHealthUp"];
 const maxBoostUpComponents = [rect(TILE_UNIT * 2, TILE_UNIT), color(0, 1.0, 1.0), "maxBoostUp"];
+const boulderComponents = [rect(TILE_UNIT * 0.75, TILE_UNIT * 0.75), origin("center"), BOULDER_COLOR, "boulder"];
+const fireballComponents = [rect(TILE_UNIT * 0.75, TILE_UNIT * 0.75), origin("center"), FIREBALL_COLOR, "fireball"];
+const vortexComponents = [rect(TILE_UNIT * 0.75, TILE_UNIT * 0.75), origin("center"), VORTEX_COLOR, "vortex"];
+const iceLanceComponents = [rect(TILE_UNIT, TILE_UNIT * 0.75), origin("center"), ICE_LANCE_COLOR, "iceLance"];
+const getStandardTerrainComponents = (element) => [rect(TILE_UNIT, TILE_UNIT), getTerrainColorForElement(element), solid(), "terrain", "standardTerrain"];
 
 const destroyBullet = (bullet) => {
     destroy(bullet);
@@ -254,7 +337,7 @@ const mapTokenConfig = (element) => ({
     // Terrain & hazards
     // TODO: Change colors based on element
     "x": [rect(TILE_UNIT, TILE_UNIT), color(0, 0, 0, 0), "outOfBounds", "kill"], // Kill the player if they go out of bounds (like in a pit)
-    "=": [rect(TILE_UNIT, TILE_UNIT), getTerrainColorForElement(element), solid(), "terrain", "standardTerrain"], // Ground
+    "=": getStandardTerrainComponents(element), // Ground
     "%": [rect(TILE_UNIT, TILE_UNIT), color(0.25, 0.25, 0.25), solid(), "crate"],// Destructible crates
     "#": getHazardTerrainForElement(element), // Elemental Hazard Terrain
     "!": getHazardForElement(element),
@@ -272,8 +355,9 @@ const mapTokenConfig = (element) => ({
     "B": ["maxBoostUpSpawner"], // Permanent extra boost spawner (conditionally added if player doesn't have it already)
     "U": maxHealthUpComponents, // Permanent extra heart
     // Enemies
-    "S": [rect(TILE_UNIT, TILE_UNIT / 2), color(0.25, 0.75, 0.95), body(), { strength: 1, health: 1, scoreValue: 1 }, "slime", "enemy"],// Slime
-    "G": [rect(TILE_UNIT, TILE_UNIT), color(0, 1.0, 0), body({ jumpForce: GOBLIN_JUMP_FORCE }), { strength: 1, health: 2, canShoot: true, scoreValue: 5 }, "goblin", "enemy"], // Goblin,
+    "S": [rect(TILE_UNIT, TILE_UNIT), color(0.25, 0.75, 0.95), body(), { strength: 1, health: 1, scoreValue: 1 }, "slime", "enemy"],// Slime
+    "G": [rect(TILE_UNIT, TILE_UNIT), color(0, 1.0, 0), body({ jumpForce: GOBLIN_JUMP_FORCE }), { strength: 1, health: 2, canShoot: true, scoreValue: 10 }, "goblin", "enemy"], // Goblin,
+    "E": [rect(TILE_UNIT, TILE_UNIT), getElementalColor(element), body({ jumpForce: GOBLIN_JUMP_FORCE }), { strength: 2, health: 5, canShoot: true, scoreValue: 50 }, "elemental", "enemy", "spikeproof", getElementalResistanceTag(element)], // Elementals
     // Bosses
     "A": [rect(TILE_UNIT * 2, TILE_UNIT * 2), color(0.45, 0.75, 0.45), { strength: 2, health: 10, scoreValue: 150 }, "arachnos", "enemy"], // Arachnos (Boss 1)
 });
@@ -304,15 +388,17 @@ function addPlayer() {
 }
 
 function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried, targetMaxBoosts }) {
-    if (elementOverride) {
-        debug.log(elementOverride);
-    }
     PLAYER_STATE.health = PLAYER_STATE.maxHealth;
+    PLAYER_STATE.maxBoosts = PLAYER_STATE.maxBoosts;
+    PLAYER_STATE.isFreezing = false;
+    PLAYER_STATE.isRockShocked = false;
+    PLAYER_STATE.isBurning = false;
 
     // Make obj default layer
     layers([
         "ui",
-        "obj"
+        "effects",
+        "obj",
     ], "obj");
 
     const sceneState = {
@@ -327,11 +413,6 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
     player.action(() => {
         camPos(player.pos.x, player.pos.y - 50);
-
-        if (PLAYER_STATE.isFreezing) {
-            PLAYER_STATE.health -= 0.0125;
-            healthText.text = getPlayerHealth();
-        }
     });
 
     const score = add([
@@ -366,7 +447,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
         layer("ui")
     ]);
 
-    // Leave the UI alone as the camer moves around
+    // Leave the UI alone as the camera moves around
     camIgnore(["ui"]);
 
 
@@ -377,15 +458,34 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
     });
 
     every("enemy", (enemy) => {
-        enemy.collides("PLAYER_BULLET", () => {
-            enemy.health -= player.strength;
+        enemy.collides("PLAYER_BULLET", (bullet) => {
+            enemy.health -= bullet.strength;
         });
 
-        enemy.collides("kill", () => {
-            // TODO: Let fire enemies walk on lava
-            destroy(enemy);
-            sceneState.defeatedEnemy = true;
+        enemy.collides("PLAYER_BOULDER", () => {
+            enemy.isRockShocked = true;
+
+            createStatusIndicator(EARTH_SPIKE_COLOR, enemy);
+
+            wait(STATUS_TIMEOUT, () => {
+                enemy.isRockShocked = false;
+            });
         });
+
+        enemy.collides("lava", () => {
+            if (enemy._tags.indexOf("fireproof") < 0) {
+                destroy(enemy);
+                sceneState.defeatedEnemy = true;
+            }
+        });
+
+        enemy.collides("spike", () => {
+            if (enemy._tags.indexOf("spikeproof") < 0) {
+                destroy(enemy);
+                sceneState.defeatedEnemy = true;
+            }
+        });
+
 
         enemy.collides("airBlast", () => {
             handleAirBlast(enemy);
@@ -415,21 +515,189 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
         }
     });
 
-    every("crate", (crate) => {
-        // crate.collides("PLAYER_BULLET", () => {
-        //     breakCrate(crate);
-        // });
+    every("elemental", (elemental) => {
+        let direction = 1;
 
-        crate.collides("ENEMY_BULLET", () => {
-            breakCrate(crate);
+        elemental.action(() => {
+            const differenceX = player.pos.x - elemental.pos.x;
+
+            // If player is left of elemental
+            if (differenceX < 0) {
+                direction = -1;
+
+                // If the elemental is within 20 units, move right
+                if (differenceX > -100) {
+                    direction = 1;
+                }
+            } else if (differenceX > 0) {
+                direction = 1;
+
+                if (differenceX < 100) {
+                    direction = -1;
+                }
+            }
+
+            if (elemental.isRockShocked) {
+                direction *= -1;
+            }
+
+            if (elemental.pos.dist(player.pos) > CUTOFF_DISTANCE) {
+                return;
+            }
+            elemental.move(25 * direction, 0);
+
+            if (elemental.canShoot) {
+                const fireDirection = player.pos.x - elemental.pos.x > 1 ? 1 : -1; // Hard-code this so it doesn't keep updating as direction updates
+                elemental.canShoot = false;
+
+                const bulletPos = vec2(elemental.pos.x + 10 * fireDirection, elemental.pos.y);
+
+                switch (element) {
+                    case EARTH:
+                        // Earth Golem
+                        const boulder = add([...boulderComponents, pos(bulletPos), "ENEMY_BOULDER"]);
+                        boulder.action(() => {
+                            boulder.move(BULLET_SPEED / 2 * fireDirection, -0.25);
+                        });
+                        boulder.collides("crate", (crate) => {
+                            breakCrate(crate);
+                        });
+                        boulder.collides("terrain", () => {
+                            destroyBullet(boulder);
+                        });
+                        boulder.collides("enemy", () => {
+                            destroyBullet(boulder);
+                        });
+                        boulder.collides("PLAYER_BULLET", () => {
+                            destroyBullet(boulder);
+                        });
+                        break;
+                    case FIRE:
+                        // Ifrit
+                        const fireball = add([...fireballComponents, pos(bulletPos), "ENEMY_FIREBALL"]);
+                        fireball.action(() => {
+                            fireball.move((BULLET_SPEED * 0.75) * fireDirection, 0);
+                            
+                            // Create a fire effect
+                            const flame = add([rect(TILE_UNIT / 2, TILE_UNIT / 2), FIREBALL_COLOR, pos(fireball.pos.x + (rand(-TILE_UNIT / 2, TILE_UNIT / 2)), fireball.pos.y - 1)])
+                            flame.action(() => {
+                                if (flame.width > 0) {
+                                    flame.width -= 0.5;
+                                    flame.height -= 0.5;
+                                    flame.pos.y -= 0.5 + rand(0, 0.5);
+                                } else {
+                                    destroy(flame);
+                                }
+                            });
+                        });
+                        fireball.collides("crate", (crate) => {
+                            breakCrate(crate);
+                        });
+                        fireball.collides("terrain", () => {
+                            destroyBullet(fireball);
+                        });
+                        fireball.collides("PLAYER_BULLET", () => {
+                            destroyBullet(fireball);
+                        });
+                        fireball.collides("enemy", () => {
+                            destroyBullet(fireball);
+                        });
+
+                        break;
+                    case AIR:
+                        // Genie
+                        const vortex = add([...vortexComponents, pos(bulletPos), "ENEMY_VORTEX"]);
+                        vortex.action(() => {
+                            if (vortex.pos.dist(player.pos) > CUTOFF_DISTANCE) {
+                                return;
+                            }
+                            const directionX = vortex.pos.x - player.pos.x > 1 ? 1 : -1;
+                            // Move toward the player
+                            vortex.move(VORTEX_SPEED * fireDirection, 0);
+                            if (vortex.pos.dist(player.pos) < 100) {
+                                // Move the player toward the vortex
+                                player.move(VORTEX_SPEED * directionX, 0);
+                            }
+
+                            // Add black hole effect
+                            const particleX = rand(vortex.pos.x - TILE_UNIT, vortex.pos.x + TILE_UNIT);
+                            const particleY = rand(vortex.pos.y - TILE_UNIT, vortex.pos.y + TILE_UNIT);
+                            const particle = add([rect(TILE_UNIT / 4, TILE_UNIT / 4), VORTEX_COLOR, pos(particleX, particleY)]);
+                            particle.action(() => {
+                                const towardVortexX = particle.pos.x < vortex.pos.x ? 1 : -1;
+                                const towardVortexY = particle.pos.y < vortex.pos.y ? 1 : -1;
+                                if (particle.width > 0) {
+                                    particle.width -= 0.1;
+                                    particle.height -= 0.1;
+                                }
+                                particle.move(5 * towardVortexX, 5 * towardVortexY);
+                            });
+
+                            particle.collides("vortex", () => {
+                                destroy(particle);
+                            });
+
+                            wait(0.25, () => {
+                                if (particle.exists()) {
+                                    destroy(particle);
+                                }
+                            });
+                        });
+                        vortex.collides("terrain", () => {
+                            destroyBullet(vortex);
+                        });
+                        vortex.collides("PLAYER_BULLET", () => {
+                            destroyBullet(vortex);
+                        });
+                        vortex.collides("enemy", () => {
+                            destroyBullet(vortex);
+                        });
+
+
+                        wait(STATUS_TIMEOUT, () => {
+                            destroy(vortex);
+                        });
+
+                        break;
+                    case WATER:
+                        // Frost Giant
+                        const iceLance = add([...iceLanceComponents, pos(elemental.pos.x + (10 * fireDirection), elemental.pos.y), "ENEMY_ICE_LANCE"]);
+                        iceLance.action(() => {
+                            iceLance.move(BULLET_SPEED * 0.5 * fireDirection, 0);
+                        });
+                        iceLance.collides("terrain", () => {
+                            destroyBullet(iceLance);
+                        });
+                        iceLance.collides("PLAYER_BULLET", () => {
+                            destroyBullet(iceLance);
+                        });
+                        iceLance.collides("enemy", () => {
+                            destroyBullet(iceLance);
+                        });
+                        iceLance.collides("crate", (crate) => {
+                            breakCrate(crate);
+                        });
+                }
+
+                wait(1.5, () => {
+                    elemental.canShoot = true;
+                });
+            }
         });
+
     });
 
     every("goblin", (goblin) => {
         goblin.action(() => {
+            const moveX = player.pos.x < goblin.pos.x ? -20 : 20;
             // Don't move if it's too far from the player
             if (goblin.pos.dist(player.pos) <= CUTOFF_DISTANCE) {
-                goblin.move(-50, 0);
+                if (goblin.isRockShocked) {
+                    // Rock shock status messes with your sense of direction
+                    goblin.move(moveX * -1, 0);
+                } else {
+                    goblin.move(moveX, 0);
+                }
 
                 // Don't shoot if it's too far from the player
                 if (Math.round(rand(0, 100)) % 23 === 0 && goblin.canShoot) {
@@ -441,10 +709,14 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
                     bulletSpeedX *= direction;
 
+                    if (goblin.isRockShocked) {
+                        bulletSpeedX *= -1;
+                    }
+
                     const bullet = add([
                         rect(5, 5),
                         color(0.25, 1.0, 0.1),
-                        pos(goblin.pos.x, goblin.pos.y),
+                        pos(goblin.pos.x + 10 * direction, goblin.pos.y),
                         "ENEMY_BULLET",
                         { strength: goblin.strength }
                     ]);
@@ -453,8 +725,11 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                         bullet.move(bulletSpeedX, bulletSpeedY);
                     });
 
-                    bullet.collides("player", () => destroyBullet(bullet));
                     bullet.collides("enemy", () => destroyBullet(bullet));
+                    bullet.collides("ENEMY_BULLET", (enemyBullet) => {
+                        destroyBullet(bullet);
+                        destroyBullet(enemyBullet);
+                    });
                     bullet.collides("terrain", () => destroyBullet(bullet));
                     bullet.collides("crate", (crate) => {
                         breakCrate(crate);
@@ -463,7 +738,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
                     goblin.canShoot = false;
 
-                    wait(1, () => {
+                    wait(2, () => {
                         destroy(bullet);
                         goblin.canShoot = true;
                     });
@@ -473,10 +748,17 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
     });
 
     every("slime", (slime) => {
+        const moveX = -10;
+
         try {
             slime.action(() => {
                 if (slime.pos.dist(player.pos) <= CUTOFF_DISTANCE) {
-                    slime.move(-20, 0);
+                    if (slime.isRockShocked) {
+                        // Rock shock status messes with your sense of direction
+                        slime.move(moveX * -1, 0);
+                    } else {
+                        slime.move(moveX, 0);
+                    }
                 }
             });
         } catch (e) {
@@ -484,43 +766,48 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
         }
     });
 
-    every("lavaBubble", (lavaBubble) => {
-        lavaBubble.action(() => {
-            if (lavaBubble.canJump) {
-                // Create a bubble in the middle horizontally and slightly above the block
-                const bubble = add([rect(TILE_UNIT / 2, TILE_UNIT / 2), LAVA_BUBBLE_COLOR, pos(lavaBubble.pos.x + (TILE_UNIT / 4), lavaBubble.pos.y - (TILE_UNIT / 2))]);
+    // every("ember", (ember) => {
+    //     let bubble;
+    //     let direction = -1;
+    //     ember.action(() => {
+    //         if (ember.canJump && (!bubble || !bubble.exists())) {
+    //             ember.canJump = false;
 
-                bubble.collides("lavaBubble", () => {
-                    destroy(bubble);
-                });
-                bubble.collides("player", () => {
-                    PLAYER_STATE.health -= lavaBubble.strength;
-                    healthText.text = getPlayerHealth();
-                });
-                bubble.collides("enemy", () => {
-                    enemy.health -= lavaBubble.strength;
-                });
-                bubble.collides("terrain", () => {
-                    destroy(bubble);
-                });
+    //             // Create a bubble in the middle horizontally and slightly above the block
+    //             bubble = add([rect(TILE_UNIT / 2, TILE_UNIT / 2), LAVA_BUBBLE_COLOR, pos(ember.pos.x + (TILE_UNIT / 4), ember.pos.y - (TILE_UNIT / 2)), body({ jumpForce: 150 })]);
 
-                // bubble.jump();
-                bubble.action(() => {
-                    let count = 0;
-                    if (!bubble.overlaps("terrain")) {
-                        count++;
-                        bubble.move(0, Math.sin(count));
-                    }
-                });
+    //             bubble.collides("ember", () => {
+    //                 destroy(bubble);
+    //             });
 
-                lavaBubble.canJump = false;
+    //             bubble.jump();
 
-                wait(1.5, () => {
-                    lavaBubble.canJump = true;
-                });
-            }
-        });
-    });
+    //             bubble.collides("player", () => {
+    //                 PLAYER_STATE.health -= ember.strength;
+    //                 healthText.text = getPlayerHealth();
+    //             });
+    //             bubble.collides("enemy", (enemy) => {
+    //                 enemy.health -= ember.strength;
+    //             });
+    //             bubble.collides("terrain", () => {
+    //                 destroy(bubble);
+    //             });
+
+    //             // bubble.action(() => {
+    //             //     if (bubble.pos.y < (ember.pos.y - 10)) {
+    //             //         direction = 1;
+    //             //     } else if (bubble.pos.y >= (ember.pos.y)) {
+    //             //         direction = -1;
+    //             //     }
+    //             //     bubble.move(0, 20 * direction);
+    //             // })
+
+    //             wait(1.5, () => {
+    //                 ember.canJump = true;
+    //             });
+    //         }
+    //     });
+    // });
 
     every("icicle", (icicle) => {
         icicle.action(async () => {
@@ -600,7 +887,6 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
         });
 
         arachnos.on("destroy", () => {
-            const lastArachnosPos = arachnos.pos;
             const collectedRewards = [];
             const maxHealthUp = add([...maxHealthUpComponents, pos((map.width() / 2), 100)]);
             const maxBoostUp = add([...maxBoostUpComponents, pos((map.width() / 2) - 40, 100)]);
@@ -608,7 +894,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
 
             for (let i = 0; i < 10; i++) {
-                add([...coinComponents, pos((width() / 2) - (80 - (i * 10)), 100)]);
+                add([...coinComponents, pos((map.width() / 2) - (80 - (i * 10)), 100)]);
             }
 
             earthGun.collides("player", () => {
@@ -617,11 +903,15 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
             });
 
             maxHealthUp.collides("player", () => {
+                PLAYER_STATE.maxHealth++;
+                PLAYER_STATE.health = PLAYER_STATE.maxHealth;
+                healthText.text = getPlayerHealth();
+                sceneState.collectedItem = true;
+
                 collectedRewards.push("maxHealthUp");
-                debug.log("Rewards? " + collectedRewards.length);
 
                 if (!maxBoostUp.exists()) {
-                    add([...goalComponents, pos((map.width() / 2) - 80, 80)]);
+                    add([...goalComponents, pos(map.width() / 2, 50)]);
                 }
 
                 destroy(maxHealthUp);
@@ -629,10 +919,14 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
             });
 
             maxBoostUp.collides("player", () => {
+                PLAYER_STATE.maxBoosts++;
+                PLAYER_STATE.numBoosts = PLAYER_STATE.maxBoosts;
+                boostText.text = getBoostIndicators(player);
+                sceneState.collectedItem = true;
+
                 collectedRewards.push("maxBoostUp");
-                debug.log("Rewards? " + collectedRewards.length);
                 if (!maxHealthUp.exists()) {
-                    add([...goalComponents, pos(lastArachnosPos)]);
+                    add([...goalComponents, pos(map.width() / 2, 50)]);
                 }
 
                 destroy(maxBoostUp);
@@ -688,7 +982,10 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
     player.collides("kill", () => {
         // Insta-kill the player (for things like lava and spikes)
-        go(currentLevel, { currentLevel, previousElement: element, hasRetried: true });
+        destroy(player);
+        wait(1, () => {
+            go(currentLevel, { currentLevel, previousElement: element, hasRetried: true });
+        });
     });
 
     player.collides("spike", (spike) => {
@@ -698,7 +995,6 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
     player.collides("earthSpike", (spike) => {
         PLAYER_STATE.health -= spike.strength;
-        PLAYER_STATE.moveSpeed = PLAYER_MOVE_SPEED / 2;
         healthText.text = getPlayerHealth();
     });
 
@@ -719,16 +1015,64 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
     });
 
     player.collides("ice", () => {
+        if (PLAYER_STATE.isFreezing) {
+            // If already freezing, return early
+            return;
+        }
+
         if (player.grounded()) {
-            PLAYER_STATE.moveSpeed = PLAYER_MOVE_SPEED * 2;
             PLAYER_STATE.isFreezing = true;
+            createStatusIndicator(ICICLE_COLOR, player);
+            wait(STATUS_TIMEOUT, () => {
+                PLAYER_STATE.isFreezing = false;
+            });
         }
     });
 
-    player.collides("standardTerrain", () => {
-        if (player.grounded()) {
-            PLAYER_STATE.moveSpeed = PLAYER_MOVE_SPEED;
-            PLAYER_STATE.isFreezing = false;
+    player.collides("ember", () => {
+        if (!PLAYER_STATE.isBurning) {
+            PLAYER_STATE.isBurning = true;
+
+            wait(STATUS_TIMEOUT, () => {
+                PLAYER_STATE.isBurning = false;
+            });
+        }
+    });
+
+    player.collides("ENEMY_FIREBALL", (fireball) => {
+        destroy(fireball);
+        if (!PLAYER_STATE.isBurning) {
+            PLAYER_STATE.isBurning = true;
+
+            wait(STATUS_TIMEOUT, () => {
+                PLAYER_STATE.isBurning = false;
+            });
+        }
+    });
+
+
+    player.collides("ENEMY_BOULDER", (boulder) => {
+        destroy(boulder);
+        if (!PLAYER_STATE.isRockShocked) {
+            PLAYER_STATE.isRockShocked = true;
+
+            createStatusIndicator(EARTH_SPIKE_COLOR, player);
+
+            wait(STATUS_TIMEOUT, () => {
+                PLAYER_STATE.isRockShocked = false;
+            });
+        }
+    });
+
+    player.collides("ENEMY_ICE_LANCE", (iceLance) => {
+        destroy(iceLance);
+        if (!PLAYER_STATE.isFreezing) {
+            PLAYER_STATE.isFreezing = true;
+            createStatusIndicator(ICE_LANCE_COLOR, player);
+    
+            wait(STATUS_TIMEOUT, () => {
+                PLAYER_STATE.isFreezing = false;
+            });
         }
     });
 
@@ -740,6 +1084,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
     player.collides("ENEMY_BULLET", (bullet) => {
         PLAYER_STATE.health -= bullet.strength;
+        destroy(bullet);
         healthText.text = getPlayerHealth();
         sceneState.tookDamage = true;
     });
@@ -769,21 +1114,13 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
         sceneState.collectedItem = true;
     });
 
-    player.collides("maxBoostUp", (maxBoostUp) => {
-        PLAYER_STATE.maxBoosts++;
-        PLAYER_STATE.numBoosts = PLAYER_STATE.maxBoosts;
-        boostText.text = getBoostIndicators(player);
-        sceneState.collectedItem = true;
-        destroy(maxBoostUp);
-    });
+    // player.collides("maxBoostUp", (maxBoostUp) => {
 
-    player.collides("maxHealthUp", (maxHealthUp) => {
-        PLAYER_STATE.maxHealth++;
-        PLAYER_STATE.health = PLAYER_STATE.maxHealth;
-        healthText.text = getPlayerHealth();
-        sceneState.collectedItem = true;
-        destroy(maxHealthUp);
-    });
+    // });
+
+    // player.collides("maxHealthUp", (maxHealthUp) => {
+
+    // });
 
     player.collides("respawningExtraBoost", (respawningExtraBoost) => {
         const itemPos = respawningExtraBoost.pos;
@@ -820,14 +1157,50 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
             const direction = PLAYER_STATE.direction;
 
-            const bullet = add([
-                rect(5, 5),
-                color(1.0, 1.0, 100),
-                pos(player.pos.x, player.pos.y),
-                "PLAYER_BULLET"
-            ]);
+            let bullet;
+
+
+            switch (PLAYER_STATE.ammoElement) {
+                case EARTH:
+                    debug.log("EARTH");
+                    bullet = add([...boulderComponents, pos(player.pos), "PLAYER_BULLET", "PLAYER_BOULDER", { strength: BOULDER_STRENGTH }]);
+                    bullet.collides("pit", (pit) => {
+                        const x = pit.pos.x;
+                        const y = pit.pos.y;
+
+                        destroy(pit);
+
+                        // Boulders replace pits with standard terrain
+                        add([...getStandardTerrainComponents(element), pos(x, y)]);
+                    });
+
+                    bullet.collides("airBlast", (airBlast) => {
+                        const x = airBlast.pos.x;
+                        const y = airBlast.pos.y;
+
+                        destroy(airBlast);
+
+                        // Boulders replace air boosts with standard terrain
+                        add([...getStandardTerrainComponents(element), pos(x, y)]);
+                    });
+                    break;
+                case NONE:
+                default:
+                    debug.log("DEFAULT");
+                    bullet = add([
+                        rect(5, 5),
+                        color(1.0, 1.0, 100),
+                        pos(player.pos),
+                        "PLAYER_BULLET",
+                        { strength: BULLET_STRENGTH }
+                    ]);
+            }
 
             bullet.collides("enemy", () => destroyBullet(bullet));
+            bullet.collides("enemy", (enemyBullet) => {
+                destroyBullet(bullet);
+                destroyBullet(enemyBullet);
+            });
             bullet.collides("terrain", () => destroyBullet(bullet));
             bullet.collides("crate", (crate) => {
                 breakCrate(crate);
@@ -871,73 +1244,117 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
     });
 
     keyDown(RIGHT, () => {
-        PLAYER_STATE.direction = 1;
-        // If they're boosting or holding down the aim button, ignore arrow keys
-        if (!player.boostTarget && !keyIsDown(AIM)) {
-            player.move(PLAYER_STATE.moveSpeed, 0);
+        let speed = PLAYER_STATE.moveSpeed;
+
+        if (PLAYER_STATE.isFreezing) {
+            speed *= 2;
+        }
+
+        if (PLAYER_STATE.isRockShocked) {
+            PLAYER_STATE.direction = -1;
+            speed *= 0.5;
+
+            // If they're boosting or holding down the aim button, ignore arrow keys
+            if (!player.boostTarget && !keyIsDown(AIM)) {
+                player.move(-speed, 0);
+            }
+        } else {
+            PLAYER_STATE.direction = 1;
+
+            // If they're boosting or holding down the aim button, ignore arrow keys
+            if (!player.boostTarget && !keyIsDown(AIM)) {
+                player.move(speed, 0);
+            }
         }
     });
 
     keyDown(LEFT, () => {
-        PLAYER_STATE.direction = -1;
-        // If they're boosting or holding down the aim button, ignore arrow keys
-        if (!player.boostTarget && !keyIsDown(AIM)) {
-            player.move(-PLAYER_STATE.moveSpeed, 0);
+        let speed = PLAYER_STATE.moveSpeed;
+
+        if (PLAYER_STATE.isFreezing) {
+            speed *= 2;
+        }
+
+        if (PLAYER_STATE.isRockShocked) {
+            PLAYER_STATE.direction = 1;
+            speed *= 0.5;
+            // If they're boosting or holding down the aim button, ignore arrow keys
+            if (!player.boostTarget && !keyIsDown(AIM)) {
+                player.move(speed, 0);
+            }
+        } else {
+            PLAYER_STATE.direction = -1;
+            // If they're boosting or holding down the aim button, ignore arrow keys
+            if (!player.boostTarget && !keyIsDown(AIM)) {
+                player.move(-speed, 0);
+            }
         }
     });
 
     keyPress(BOOST, () => {
+        let speed = PLAYER_BOOST_SPEED;
+
+        if (PLAYER_STATE.isRockShocked) {
+            speed *= 0.5;
+        } else if (PLAYER_STATE.isBurning) {
+            speed *= 1.5;
+        }
+
         // if (player.canBoost) {
         if ((PLAYER_STATE.numBoosts + PLAYER_STATE.tempBoosts) > 0) {
             if (keyIsDown(RIGHT)) {
                 if (keyIsDown(UP)) {
                     // If up and right are both pressed
                     // Divide Y boost by two because otherwise it seems too good
-                    player.boostTarget = vec2(player.pos.x + PLAYER_BOOST_SPEED, player.pos.y - (PLAYER_BOOST_SPEED / 2));
+                    player.boostTarget = vec2(player.pos.x + speed, player.pos.y - (speed / 2));
                 } else if (keyIsDown(DOWN)) {
                     // If down and right are both pressed
                     if (player.grounded()) {
                         // If grounded, just go right
-                        player.boostTarget = vec2(player.pos.x + PLAYER_BOOST_SPEED, player.pos.y);
+                        player.boostTarget = vec2(player.pos.x + speed, player.pos.y);
                     } else {
                         // Divide Y boost by two because otherwise it seems too good
-                        player.boostTarget = vec2(player.pos.x + PLAYER_BOOST_SPEED, player.pos.y + (PLAYER_BOOST_SPEED / 2));
+                        player.boostTarget = vec2(player.pos.x + speed, player.pos.y + (speed / 2));
                     }
                 } else {
                     // If just right is pressed
-                    player.boostTarget = vec2(player.pos.x + PLAYER_BOOST_SPEED, player.pos.y);
+                    player.boostTarget = vec2(player.pos.x + speed, player.pos.y);
                 }
             } else if (keyIsDown(LEFT)) {
                 if (keyIsDown(UP)) {
                     // If up and left are both pressed
                     // Divide Y boost by two because otherwise it seems too good
-                    player.boostTarget = vec2(player.pos.x - PLAYER_BOOST_SPEED, player.pos.y - (PLAYER_BOOST_SPEED / 2));
+                    player.boostTarget = vec2(player.pos.x - speed, player.pos.y - (speed / 2));
                 } else if (keyIsDown(DOWN)) {
                     // If down and left are both pressed
                     if (player.grounded()) {
                         // If grounded, just go left
-                        player.boostTarget = vec2(player.pos.x - PLAYER_BOOST_SPEED, player.pos.y);
+                        player.boostTarget = vec2(player.pos.x - speed, player.pos.y);
                     } else {
                         // Divide Y boost by two because otherwise it seems too good
-                        player.boostTarget = vec2(player.pos.x - PLAYER_BOOST_SPEED, player.pos.y + (PLAYER_BOOST_SPEED / 2))
+                        player.boostTarget = vec2(player.pos.x - speed, player.pos.y + (speed / 2))
                     }
                 } else {
                     // If just left is pressed
-                    player.boostTarget = vec2(player.pos.x - PLAYER_BOOST_SPEED, player.pos.y);
+                    player.boostTarget = vec2(player.pos.x - speed, player.pos.y);
                 }
             } else if (keyIsDown(UP)) {
                 // If just up is pressed
                 // Dividing by two because otherwise it seems too good
-                player.boostTarget = vec2(player.pos.x, player.pos.y - (PLAYER_BOOST_SPEED / 2));
+                player.boostTarget = vec2(player.pos.x, player.pos.y - (speed / 2));
             } else if (keyIsDown(DOWN) && !player.grounded()) {
                 // If just down is pressed
-                player.boostTarget = vec2(player.pos.x, player.pos.y + PLAYER_BOOST_SPEED);
+                player.boostTarget = vec2(player.pos.x, player.pos.y + speed);
             } else {
                 // If NO KEYS are pressed, go right
-                player.boostTarget = vec2(player.pos.x + PLAYER_BOOST_SPEED, player.pos.y);
+                player.boostTarget = vec2(player.pos.x + speed, player.pos.y);
             }
             // Disable ALL gravity when boosting
             gravity(0);
+
+            // Boosting puts out fires
+            PLAYER_STATE.isBurning = false;
+
             // player.canBoost = false;
             if (PLAYER_STATE.numBoosts > 0) {
                 PLAYER_STATE.numBoosts--;
@@ -959,7 +1376,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
     keyPress(AMMO_CYCLE_BACK, () => {
         if (PLAYER_STATE.availableAmmos.length > 1) {
             const currentIndex = PLAYER_STATE.availableAmmos.indexOf(PLAYER_STATE.ammoElement);
-            const nextIndex = currentIndex - 1 > 0 ? currentIndex - 1 : PLAYER_STATE.availableAmmos.length;
+            const nextIndex = currentIndex - 1 >= 0 ? currentIndex - 1 : PLAYER_STATE.availableAmmos.length;
             PLAYER_STATE.ammoElement = PLAYER_STATE.availableAmmos[nextIndex];
 
             ammoText.text = `Weapon: ${spellNames[PLAYER_STATE.ammoElement]}`;
@@ -982,6 +1399,31 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
             destroy(player);
             wait(1, () => {
                 go(currentLevel, { currentLevel, previousElement: element, hasRetried: true });
+            });
+        }
+
+        if (PLAYER_STATE.isFreezing) {
+            // If frozen, keep moving in direction even when not moving (sliding)
+            player.move((PLAYER_STATE.moveSpeed * PLAYER_STATE.direction / 2), 0);
+            PLAYER_STATE.health -= 0.0125;
+            healthText.text = getPlayerHealth();
+        }
+
+        if (PLAYER_STATE.isBurning) {
+            // Take damage each frame
+            PLAYER_STATE.health -= 0.0125;
+            healthText.text = getPlayerHealth();
+
+            // Create a fire effect
+            const flame = add([rect(TILE_UNIT / 2, TILE_UNIT / 2), FIREBALL_COLOR, pos(player.pos.x + (rand(-TILE_UNIT / 2, TILE_UNIT / 2)), player.pos.y - 1)])
+            flame.action(() => {
+                if (flame.width > 0) {
+                    flame.width -= 0.5;
+                    flame.height -= 0.5;
+                    flame.pos.y -= 0.5 + rand(0, 0.5);
+                } else {
+                    destroy(flame);
+                }
             });
         }
 
@@ -1104,13 +1546,13 @@ scene("two", ({ previousElement }) => {
         "x=                                           !!          %     ##       =x",
         "x=                                                       %              =x",
         "x=                                                       %     oo     * =x",
-        "x= oo                           ==           !!          ================x",
+        "x= oo              ==           ==           !!          ================x",
         "x======                    !!                                           =x",
-        "x=              ========                                                =x",
+        "x=                                                                      =x",
         "x=               !!!!!!                             ooo             %%% =x",
         "x=                                                 o   o            %h% =x",
-        "x= P      S                            h                      G     %%% =x",
-        "x==========######!!!!!!######=======================###==================x",
+        "x= P                         =       S h      =               G     %%% =x",
+        "x==========######!!!!!!######=======================######!!!!!####======x",
         "x                                                                        x",
         "x                                                                        x",
         "x                                                                        x",
@@ -1169,10 +1611,12 @@ scene("four", ({ previousElement, targetMaxBoosts = 2 }) => {
     const nextLevel = "five";
     const element = getElement(previousElement);
 
+    PLAYER_STATE.availableAmmos.push(EARTH);
+
     const map = addLevel([
         "x============================================x",
         "x=                                          =x",
-        "x=                                  ^       =x",
+        "x=                                 h^h      =x",
         "x=                                 ===      =x",
         "x=                                          =x",
         "x=  P                                       =x",
@@ -1182,11 +1626,11 @@ scene("four", ({ previousElement, targetMaxBoosts = 2 }) => {
         "x=   o                    o                 =x",
         "x=  ===                   =                 =x",
         "x=                                          =x",
-        "x=            ++++++++++++++++++++++++++++++=x",
+        "x=            ####++++####++++####++++####++=x",
         "x=                                          =x",
-        "x=                                          =x",
-        "x=     =====                                =x",
-        "x=                                          =x",
+        "x=         oooooooo  ooooo                  =x",
+        "x=     =====              oo                =x",
+        "x=                           ooooo          =x",
         "x=            ++###++###++#+   ===       *  =x",
         "x=                                          =x",
         "x=                                #####+++++=x",
@@ -1208,23 +1652,23 @@ scene("five", ({ previousElement }) => {
     const element = getElement(previousElement);
     const map = addLevel([
         "x===================================================================x",
-        "x=                                                                 =x",
-        "x=                                                                 =x",
-        "x=     !!!!!!                                                      =x",
+        "x=  %                                                           %% =x",
+        "x= % %                                                         %%%%=x",
+        "x======!!!!!!=====                                            ======x",
         "x=                                                                 =x",
         "x=                                                                 =x",
         "x=                                                       !!!       =x",
-        "x=                                                                 =x",
+        "x=                                                             E   =x",
         "x=                  ======   ##########                     #######=x",
         "x=                                                                 =x",
         "x=                                                                 =x",
-        "x=                                                                 =x",
-        "x=         ===                                                     =x",
-        "x=                             ####################################=x",
-        "x=    +++      +++   %         #                                   =x",
-        "x=                  % %        #                                   =x",
-        "x= P               % % %       #                                 * =x",
-        "x=====###!!!!!!###========######!!!!!!######################========x",
+        "x=                                              o                  =x",
+        "x=         ===                                  o                  =x",
+        "x=                             ##############%%%%%%%###############=x",
+        "x=    +++      +++   %                          o                  =x",
+        "x=                  % %                        === ooooooooo       =x",
+        "x= P               % % %                                     ooo * =x",
+        "x=====###!!!!!!###========######!!!!!!#######+++++++########========x",
         "x                                                                   x",
         "x                                                                   x",
         "x                                                                   x",
