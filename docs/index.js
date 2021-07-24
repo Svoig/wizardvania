@@ -14,6 +14,7 @@ const AIR_BLAST_FORCE = 50;
 const LAVA_BUBBLE_JUMP_FORCE = 300;
 const BULLET_STRENGTH = 1;
 const BOULDER_STRENGTH = 2;
+const FIREBALL_STRENGTH = 2;
 
 const STATUS_TIMEOUT = 2;
 
@@ -107,14 +108,14 @@ function createStatusIndicator(color, parent) {
     indicator.action(() => {
         indicator.pos = parent.pos;
 
-        indicator.width += 0.1 * direction;
-        indicator.height += 0.1 * direction;
-
         if (indicator.height > TILE_UNIT * 1.5) {
             direction = -1;
         } else if (indicator.height < 0.25) {
             direction = 1;
         }
+
+        indicator.width += 0.2 * direction;
+        indicator.height += 0.2 * direction;
 
         if (!parent.exists()) {
             destroy(indicator);
@@ -328,6 +329,23 @@ const handleAirBlast = (obj) => {
     }
 }
 
+const createFireEffect = (parent, isFireball = false) => {
+    const posX = isFireball ? parent.pos.x + (rand(0, TILE_UNIT / 2)) : parent.pos.x + (rand(-TILE_UNIT / 2, TILE_UNIT / 2));
+    const posY = isFireball ? parent.pos.y + rand(-TILE_UNIT / 2, TILE_UNIT / 2) : parent.pos.y - (TILE_UNIT / 2);
+    // Create a fire effect
+    const flame = add([rect(TILE_UNIT / 2, TILE_UNIT / 2), origin("center"), FIREBALL_COLOR, pos(posX, posY)]);
+    flame.action(() => {
+        if (flame.width > 0) {
+            flame.width -= 0.5;
+            flame.height -= 0.5;
+            // flame.pos.y += 0.5; // Account for shrinking height
+            flame.pos.y -= 0.5 + rand(0, 0.5); // Rising flames
+        } else {
+            destroy(flame);
+        }
+    });
+}
+
 const mapTokenConfig = (element) => ({
     width: TILE_UNIT,
     height: TILE_UNIT,
@@ -355,11 +373,13 @@ const mapTokenConfig = (element) => ({
     "B": ["maxBoostUpSpawner"], // Permanent extra boost spawner (conditionally added if player doesn't have it already)
     "U": maxHealthUpComponents, // Permanent extra heart
     // Enemies
-    "S": [rect(TILE_UNIT, TILE_UNIT), color(0.25, 0.75, 0.95), body(), { strength: 1, health: 1, scoreValue: 1 }, "slime", "enemy"],// Slime
-    "G": [rect(TILE_UNIT, TILE_UNIT), color(0, 1.0, 0), body({ jumpForce: GOBLIN_JUMP_FORCE }), { strength: 1, health: 2, canShoot: true, scoreValue: 10 }, "goblin", "enemy"], // Goblin,
-    "E": [rect(TILE_UNIT, TILE_UNIT), getElementalColor(element), body({ jumpForce: GOBLIN_JUMP_FORCE }), { strength: 2, health: 5, canShoot: true, scoreValue: 50 }, "elemental", "enemy", "spikeproof", getElementalResistanceTag(element)], // Elementals
+    "S": [rect(TILE_UNIT, TILE_UNIT), origin("center"), color(0.25, 0.75, 0.95), body(), { strength: 1, health: 1, scoreValue: 1 }, "slime", "enemy"],// Slime
+    "G": [rect(TILE_UNIT, TILE_UNIT), origin("center"), color(0, 1.0, 0), body({ jumpForce: GOBLIN_JUMP_FORCE }), { strength: 1, health: 2, canShoot: true, scoreValue: 10 }, "goblin", "enemy"], // Goblin,
+    "E": [rect(TILE_UNIT, TILE_UNIT), origin("center"), getElementalColor(element), body({ jumpForce: GOBLIN_JUMP_FORCE }), { strength: 2, health: 5, canShoot: true, scoreValue: 50 }, "elemental", "enemy", "spikeproof", getElementalResistanceTag(element)], // Elementals
+    "f": [rect(TILE_UNIT, TILE_UNIT), FIREBALL_COLOR, { aggro: false, strength: 0.1, health: 1, target: null }, "flameBat", "enemy"], // Flame bat
     // Bosses
-    "A": [rect(TILE_UNIT * 2, TILE_UNIT * 2), color(0.45, 0.75, 0.45), { strength: 2, health: 10, scoreValue: 150 }, "arachnos", "enemy"], // Arachnos (Boss 1)
+    "A": [rect(TILE_UNIT * 2, TILE_UNIT * 2), origin("center"), color(0.45, 0.75, 0.45), { strength: 2, health: 10, scoreValue: 150 }, "arachnos", "enemy"], // Arachnos (Boss 1)
+    "F": [rect(TILE_UNIT * 2, TILE_UNIT * 2), origin("center"), color(0, 1, 0, 1), { numBats: 10 }, "flameBatSwarm"] // Flame bat swarm (Boss 2)
 });
 
 function addPlayer() {
@@ -367,6 +387,7 @@ function addPlayer() {
     return add([
         rect(TILE_UNIT, TILE_UNIT),
         PLAYER_STATE.color,
+        origin("center"),
         pos(-1000, -1000), // Start offscreen. Let every("playerStart") put the player in the right place
         body({ maxVel: MAX_VELOCITY, jumpForce: PLAYER_JUMP_FORCE }),
         "player",
@@ -396,9 +417,9 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
     // Make obj default layer
     layers([
-        "ui",
         "effects",
         "obj",
+        "ui",
     ], "obj");
 
     const sceneState = {
@@ -576,19 +597,9 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                         // Ifrit
                         const fireball = add([...fireballComponents, pos(bulletPos), "ENEMY_FIREBALL"]);
                         fireball.action(() => {
-                            fireball.move((BULLET_SPEED * 0.75) * fireDirection, 0);
-                            
-                            // Create a fire effect
-                            const flame = add([rect(TILE_UNIT / 2, TILE_UNIT / 2), FIREBALL_COLOR, pos(fireball.pos.x + (rand(-TILE_UNIT / 2, TILE_UNIT / 2)), fireball.pos.y - 1)])
-                            flame.action(() => {
-                                if (flame.width > 0) {
-                                    flame.width -= 0.5;
-                                    flame.height -= 0.5;
-                                    flame.pos.y -= 0.5 + rand(0, 0.5);
-                                } else {
-                                    destroy(flame);
-                                }
-                            });
+                            fireball.move((BULLET_SPEED * 0.5) * fireDirection, 0);
+
+                            createFireEffect(fireball, true);
                         });
                         fireball.collides("crate", (crate) => {
                             breakCrate(crate);
@@ -716,7 +727,9 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                     const bullet = add([
                         rect(5, 5),
                         color(0.25, 1.0, 0.1),
-                        pos(goblin.pos.x + 10 * direction, goblin.pos.y),
+                        origin("center"),
+                        // pos(goblin.pos.x + 10 * direction, goblin.pos.y),
+                        pos(goblin.pos),
                         "ENEMY_BULLET",
                         { strength: goblin.strength }
                     ]);
@@ -820,7 +833,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                     healthText.text = getPlayerHealth();
                     destroy(icicleDrop);
                 });
-                icicleDrop.collides("enemy", () => {
+                icicleDrop.collides("enemy", (enemy) => {
                     enemy.health -= icicle.strength;
                     destroy(icicleDrop);
                 });
@@ -932,15 +945,9 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                 destroy(maxBoostUp);
 
             });
-
-
         });
 
-        let actionCounter = 0;
-
-        // arachnos.action(throttle(() => {
         arachnos.action(() => {
-            actionCounter++;
             const distanceFromTarget = arachnos.pos.dist(target);
             const distanceFromPlayer = arachnos.pos.dist(player.pos);
 
@@ -973,6 +980,92 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
             arachnos.move(speed * directionX, speed * directionY);
 
             // }, 250));
+        });
+    });
+
+    every("flameBat", (flameBat) => {
+        createFireEffect(flameBat);
+        flameBat.action(() => {
+            if (!flameBat.target || flameBat.pos.dist(flameBat.target) < 5) {
+                let targetX;
+                let targetY;
+                if (flameBat.aggro) {
+                    targetX = rand(player.pos.x - 50, player.pos.x + 50);
+                    targetY = rand(player.pos.y - 50, player.pos.y + 50);
+                } else {
+
+                    // Swarm around if not aggroed at player yet
+                    targetX = rand(flameBat.pos.x - 10, flameBat.pos.x + 10);
+                    targetY = rand(flameBat.pos.y - 10, flameBat.pos.y + 10);
+                }
+
+                flameBat.target = vec2(targetX, targetY);
+
+            }
+
+            // Once player gets close, get 'em!
+            if (!flameBat.aggro && player.pos.dist(flameBat.pos) < 100) {
+                flameBat.aggro = true;
+            }
+
+            flameBat.pos.x = lerp(flameBat.pos.x, flameBat.target.x, 0.125);
+            flameBat.pos.y = lerp(flameBat.pos.y, flameBat.target.y, 0.125);
+
+        });
+    });
+
+    every("flameBatSwarm", (swarm) => {
+        const bats = [];
+
+        on("destroy", "flameBat", (bat) => {
+            bats.pop();
+
+            if (bats.length === 0) {
+                const collectedRewards = [];
+                const maxHealthUp = add([...maxHealthUpComponents, pos((map.width() / 2), 100)]);
+                const maxBoostUp = add([...maxBoostUpComponents, pos((map.width() / 2) - 40, 100)]);
+                const fireGun = add([rect(TILE_UNIT * 2, TILE_UNIT), FIREBALL_COLOR, pos((map.width() / 2) - 80, 100), "fireGun"]);
+
+
+                for (let i = 0; i < 10; i++) {
+                    add([...coinComponents, pos((map.width() / 2) - (80 - (i * 10)), 100)]);
+                }
+
+                fireGun.collides("player", () => {
+                    PLAYER_STATE.availableAmmos.push(FIRE);
+                    destroy(fireGun);
+                });
+
+                maxHealthUp.collides("player", () => {
+                    PLAYER_STATE.maxHealth++;
+                    PLAYER_STATE.health = PLAYER_STATE.maxHealth;
+                    healthText.text = getPlayerHealth();
+                    sceneState.collectedItem = true;
+
+                    collectedRewards.push("maxHealthUp");
+
+                    if (!maxBoostUp.exists()) {
+                        add([...goalComponents, pos(map.width() / 2, 50)]);
+                    }
+
+                    destroy(maxHealthUp);
+
+                });
+
+                maxBoostUp.collides("player", () => {
+                    PLAYER_STATE.maxBoosts++;
+                    PLAYER_STATE.numBoosts = PLAYER_STATE.maxBoosts;
+                    boostText.text = getBoostIndicators(player);
+                    sceneState.collectedItem = true;
+
+                    collectedRewards.push("maxBoostUp");
+                    if (!maxHealthUp.exists()) {
+                        add([...goalComponents, pos(map.width() / 2, 50)]);
+                    }
+
+                    destroy(maxBoostUp);
+                });
+            }
         });
     });
 
@@ -1069,7 +1162,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
         if (!PLAYER_STATE.isFreezing) {
             PLAYER_STATE.isFreezing = true;
             createStatusIndicator(ICE_LANCE_COLOR, player);
-    
+
             wait(STATUS_TIMEOUT, () => {
                 PLAYER_STATE.isFreezing = false;
             });
@@ -1162,8 +1255,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
             switch (PLAYER_STATE.ammoElement) {
                 case EARTH:
-                    debug.log("EARTH");
-                    bullet = add([...boulderComponents, pos(player.pos), "PLAYER_BULLET", "PLAYER_BOULDER", { strength: BOULDER_STRENGTH }]);
+                    bullet = add([...boulderComponents, pos(player.pos), origin("center"), "PLAYER_BULLET", "PLAYER_BOULDER", { strength: BOULDER_STRENGTH }]);
                     bullet.collides("pit", (pit) => {
                         const x = pit.pos.x;
                         const y = pit.pos.y;
@@ -1180,17 +1272,31 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
                         destroy(airBlast);
 
-                        // Boulders replace air boosts with standard terrain
+                        // Boulders replace air blasts with standard terrain
                         add([...getStandardTerrainComponents(element), pos(x, y)]);
                     });
                     break;
+                case FIRE:
+                    bullet = add([...fireballComponents, pos(player.pos), "PLAYER_BULLET", "PLAYER_FIREBALL", { strength: FIREBALL_STRENGTH }]);
+
+                    createFireEffect(bullet, true);
+
+                    bullet.collides("icicle", (icicle) => {
+                        const x = icicle.pos.x;
+                        const y = icicle.pos.y;
+
+                        destroy(icicle);
+
+                        // Fireballs replace icicles with standard terrain
+                        add([...getStandardTerrainComponents(element), pos(x, y)]);
+                    });
                 case NONE:
                 default:
-                    debug.log("DEFAULT");
                     bullet = add([
                         rect(5, 5),
                         color(1.0, 1.0, 100),
                         pos(player.pos),
+                        origin("center"),
                         "PLAYER_BULLET",
                         { strength: BULLET_STRENGTH }
                     ]);
@@ -1414,17 +1520,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
             PLAYER_STATE.health -= 0.0125;
             healthText.text = getPlayerHealth();
 
-            // Create a fire effect
-            const flame = add([rect(TILE_UNIT / 2, TILE_UNIT / 2), FIREBALL_COLOR, pos(player.pos.x + (rand(-TILE_UNIT / 2, TILE_UNIT / 2)), player.pos.y - 1)])
-            flame.action(() => {
-                if (flame.width > 0) {
-                    flame.width -= 0.5;
-                    flame.height -= 0.5;
-                    flame.pos.y -= 0.5 + rand(0, 0.5);
-                } else {
-                    destroy(flame);
-                }
-            });
+            createFireEffect(player);
         }
 
         // If they boosted, give them their boost back when they hit the ground
@@ -1654,17 +1750,17 @@ scene("five", ({ previousElement }) => {
         "x===================================================================x",
         "x=  %                                                           %% =x",
         "x= % %                                                         %%%%=x",
-        "x======!!!!!!=====                                            ======x",
+        "x======!!!!!!=====                                       !!!!!======x",
         "x=                                                                 =x",
         "x=                                                                 =x",
         "x=                                                       !!!       =x",
-        "x=                                                             E   =x",
-        "x=                  ======   ##########                     #######=x",
+        "x=                                                                 =x",
+        "x=                  ======                                 #######=x",
         "x=                                                                 =x",
         "x=                                                                 =x",
         "x=                                              o                  =x",
-        "x=         ===                                  o                  =x",
-        "x=                             ##############%%%%%%%###############=x",
+        "x=         ===                 =                o                E =x",
+        "x=                             =======#######%%%%%%%###############=x",
         "x=    +++      +++   %                          o                  =x",
         "x=                  % %                        === ooooooooo       =x",
         "x= P               % % %                                     ooo * =x",
@@ -1681,6 +1777,55 @@ scene("five", ({ previousElement }) => {
     const player = addPlayer();
 
     sceneSetup({ player, element, currentLevel: "five", nextLevel, map });
+});
+
+scene("six", ({ previousElement }) => {
+    const nextLevel = "seven";
+    // Flame bat swarm is always fire
+    const element = FIRE;
+    const map = addLevel([
+        "x=================================================================================================x",
+        "x=                                                                                               =x",
+        "x=                                              fffff                                            =x",
+        "x=                                              ffFff                                            =x",
+        "x=                                              fffff                                            =x",
+        "x=                                                                                               =x",
+        "x=                                                                                               =x",
+        "x=                                          ====!!!!!====                                        =x",
+        "x=                                                                                               =x",
+        "x=                                                                                               =x",
+        "x=                                                                                               =x",
+        "x=                                                                                               =x",
+        "x=           %%                                                                     %%       %%  =x",
+        "x= P        %%%%                                                                   %%%%     %%%% =x",
+        "x================                                                                 ================x",
+        "x=                                       ====!!!==#==!!!====                                     =x",
+        "x=                                                                                               =x",
+        "x=                                                                                               =x",
+        "x=                                                                                               =x",
+        "x=                                                                                               =x",
+        "x=                                                                                               =x",
+        "x=               ===============                                   ===============               =x",
+        "x=                                                                                               =x",
+        "x=                                                                                               =x",
+        "x=    %%                                                                                   %%    =x",
+        "x= h %%%%                       !!!!!#########!!!!!!!!########!!!!!                       %%%% h =x",
+        "x= ========                                                                             ======== =x",
+        "x=                                                                                               =x",
+        "x=                                                                                               =x",
+        "x=###############################################################################################=x",
+        "x                                                                                                 x",
+        "x                                                                                                 x",
+        "x                                                                                                 x",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+
+    ],
+        mapTokenConfig(element)
+    );
+
+    const player = addPlayer();
+
+    sceneSetup({ player, element, currentLevel: "six", nextLevel, map });
 });
 
 scene("interlude", ({ currentLevel, previousElement, nextLevel, tookDamage, defeatedEnemy, collectedItem, retried }) => {
