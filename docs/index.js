@@ -92,6 +92,14 @@ const FIREBALL_COLOR = color(0.75, 0.2, 0.2);
 const VORTEX_COLOR = color(0.85, 0.85, 0.85);
 const ICE_LANCE_COLOR = color(0, 0, 1);
 
+function addHintBox(map) {
+    return add([rect(map.width(), map.height()), origin("center"), color(0, 0, 0, 1), pos(map.width() / 2, map.height() / 2, layer("ui"))])
+}
+
+function addHintText(message, map) {
+    return add([text(message, 8), origin("center"), color(1, 1, 1, 1), pos(map.width() / 2, map.height() / 2), layer("ui")]);
+}
+
 function createStatusIndicator(color, parent) {
     const indicator = add([
         // sprite("status"),
@@ -127,6 +135,21 @@ function createStatusIndicator(color, parent) {
     })
 
     return indicator;
+}
+
+function fadeOut(obj, destroyWhenComplete = true) {
+    obj.action(() => {
+        if (!obj.color) {
+            return;
+        }
+
+        if (obj.color.a > 0) {
+            obj.color.a -= 0.1;
+        }
+        else if (obj.color.a <= 0 && destroyWhenComplete) {
+            destroy(obj);
+        }
+    });
 }
 
 
@@ -376,10 +399,10 @@ const mapTokenConfig = (element) => ({
     "S": [rect(TILE_UNIT, TILE_UNIT), origin("center"), color(0.25, 0.75, 0.95), body(), { strength: 1, health: 1, scoreValue: 1 }, "slime", "enemy"],// Slime
     "G": [rect(TILE_UNIT, TILE_UNIT), origin("center"), color(0, 1.0, 0), body({ jumpForce: GOBLIN_JUMP_FORCE }), { strength: 1, health: 2, canShoot: true, scoreValue: 10 }, "goblin", "enemy"], // Goblin,
     "E": [rect(TILE_UNIT, TILE_UNIT), origin("center"), getElementalColor(element), body({ jumpForce: GOBLIN_JUMP_FORCE }), { strength: 2, health: 5, canShoot: true, scoreValue: 50 }, "elemental", "enemy", "spikeproof", getElementalResistanceTag(element)], // Elementals
-    "f": [rect(TILE_UNIT, TILE_UNIT), FIREBALL_COLOR, { aggro: false, strength: 0.1, health: 1, target: null }, "flameBat", "enemy"], // Flame bat
+    "f": [rect(TILE_UNIT, TILE_UNIT), FIREBALL_COLOR, { aggro: false, strength: 0.1, health: 1, scoreValue: 25, target: null }, "flameBat", "fireproof", "enemy"], // Flame bat
     // Bosses
     "A": [rect(TILE_UNIT * 2, TILE_UNIT * 2), origin("center"), color(0.45, 0.75, 0.45), { strength: 2, health: 10, scoreValue: 150 }, "arachnos", "enemy"], // Arachnos (Boss 1)
-    "F": [rect(TILE_UNIT * 2, TILE_UNIT * 2), origin("center"), color(0, 1, 0, 1), { numBats: 10 }, "flameBatSwarm"] // Flame bat swarm (Boss 2)
+    "F": [rect(TILE_UNIT * 2, TILE_UNIT * 2), origin("center"), color(0, 0, 0, 0), { numBats: 10 }, "flameBatSwarm"] // Flame bat swarm (Boss 2)
 });
 
 function addPlayer() {
@@ -408,7 +431,15 @@ function addPlayer() {
     ]);
 }
 
-function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried, targetMaxBoosts }) {
+function sceneSetup({
+    player,
+    element,
+    currentLevel,
+    nextLevel,
+    map,
+    hasRetried,
+    targetMaxBoosts
+}) {
     PLAYER_STATE.health = PLAYER_STATE.maxHealth;
     PLAYER_STATE.maxBoosts = PLAYER_STATE.maxBoosts;
     PLAYER_STATE.isFreezing = false;
@@ -912,6 +943,12 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
             earthGun.collides("player", () => {
                 PLAYER_STATE.availableAmmos.push(EARTH);
+                const hintBox = addHintBox(map);
+                const hintText = addHintText("You got the BOULDER weapon!\n\nCycle your weapons with the arrow keys\n\nBoulders stun enemies and create\n\nsolid ground from pits\non air levels!", map);
+                keyPress(["enter", "space"], () => {
+                    fadeOut(hintBox);
+                    fadeOut(hintText);
+                });
                 destroy(earthGun);
             });
 
@@ -921,22 +958,36 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                 healthText.text = getPlayerHealth();
                 sceneState.collectedItem = true;
 
+                const hintBox = addHintBox(map);
+                    const hintText = addHintText("Your health has increased!", map);
+                    keyPress(["enter", "space"], () => {
+                        fadeOut(hintBox);
+                        fadeOut(hintText);
+                    });
+                
+                
                 collectedRewards.push("maxHealthUp");
-
+                
                 if (!maxBoostUp.exists()) {
                     add([...goalComponents, pos(map.width() / 2, 50)]);
                 }
-
+                
                 destroy(maxHealthUp);
-
+                
             });
-
+            
             maxBoostUp.collides("player", () => {
                 PLAYER_STATE.maxBoosts++;
                 PLAYER_STATE.numBoosts = PLAYER_STATE.maxBoosts;
                 boostText.text = getBoostIndicators(player);
                 sceneState.collectedItem = true;
-
+                
+                const hintBox = addHintBox(map);
+                const hintText = addHintText("You can now boost an additional time\nbefore hitting the ground!", map);
+                keyPress(["enter", "space"], () => {
+                    fadeOut(hintBox);
+                    fadeOut(hintText);
+                });
                 collectedRewards.push("maxBoostUp");
                 if (!maxHealthUp.exists()) {
                     add([...goalComponents, pos(map.width() / 2, 50)]);
@@ -984,7 +1035,6 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
     });
 
     every("flameBat", (flameBat) => {
-        createFireEffect(flameBat);
         flameBat.action(() => {
             if (!flameBat.target || flameBat.pos.dist(flameBat.target) < 5) {
                 let targetX;
@@ -1008,6 +1058,10 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                 flameBat.aggro = true;
             }
 
+            if (flameBat.aggro) {
+                createFireEffect(flameBat, true);
+            }
+
             flameBat.pos.x = lerp(flameBat.pos.x, flameBat.target.x, 0.125);
             flameBat.pos.y = lerp(flameBat.pos.y, flameBat.target.y, 0.125);
 
@@ -1016,6 +1070,10 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
     every("flameBatSwarm", (swarm) => {
         const bats = [];
+
+        every("flameBat", (bat) => {
+            bats.push(bat);
+        });
 
         on("destroy", "flameBat", (bat) => {
             bats.pop();
@@ -1033,6 +1091,12 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
 
                 fireGun.collides("player", () => {
                     PLAYER_STATE.availableAmmos.push(FIRE);
+                    const hintBox = addHintBox(map);
+                    const hintText = addHintText("You got the FIREBALL weapon!\n\nCycle your weapons with the arrow keys\n\nFireballs ignite enemies and create\n\nsolid ground from ice\non water levels!", map);
+                    keyPress(["enter", "space"], () => {
+                        fadeOut(hintBox);
+                        fadeOut(hintText);
+                    });
                     destroy(fireGun);
                 });
 
@@ -1043,6 +1107,14 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                     sceneState.collectedItem = true;
 
                     collectedRewards.push("maxHealthUp");
+
+                    const hintBox = addHintBox(map);
+                    const hintText = addHintText("Your health has increased!", map);
+                    keyPress(["enter", "space"], () => {
+                        fadeOut(hintBox);
+                        fadeOut(hintText);
+                    });
+
 
                     if (!maxBoostUp.exists()) {
                         add([...goalComponents, pos(map.width() / 2, 50)]);
@@ -1057,6 +1129,13 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                     PLAYER_STATE.numBoosts = PLAYER_STATE.maxBoosts;
                     boostText.text = getBoostIndicators(player);
                     sceneState.collectedItem = true;
+
+                    const hintBox = addHintBox(map);
+                    const hintText = addHintText("You can now boost an additional time\nbefore hitting the ground!", map);
+                    keyPress(["enter", "space"], () => {
+                        fadeOut(hintBox);
+                        fadeOut(hintText);
+                    });
 
                     collectedRewards.push("maxBoostUp");
                     if (!maxHealthUp.exists()) {
@@ -1277,9 +1356,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                     });
                     break;
                 case FIRE:
-                    bullet = add([...fireballComponents, pos(player.pos), "PLAYER_BULLET", "PLAYER_FIREBALL", { strength: FIREBALL_STRENGTH }]);
-
-                    createFireEffect(bullet, true);
+                    bullet = add([...fireballComponents, pos(player.pos), "PLAYER_BULLET", "PLAYER_FIREBALL", { strength: FIREBALL_STRENGTH, isFireball: true }]);
 
                     bullet.collides("icicle", (icicle) => {
                         const x = icicle.pos.x;
@@ -1290,6 +1367,7 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
                         // Fireballs replace icicles with standard terrain
                         add([...getStandardTerrainComponents(element), pos(x, y)]);
                     });
+                    break;
                 case NONE:
                 default:
                     bullet = add([
@@ -1322,6 +1400,9 @@ function sceneSetup({ player, element, currentLevel, nextLevel, map, hasRetried,
             }
 
             bullet.action(() => {
+                if (bullet.isFireball) {
+                    createFireEffect(bullet, true);
+                }
                 // The Remote Control power lets players redirect their bullets in the air!
                 if (PLAYER_STATE.hasRemoteControl) {
                     bullet.move(bulletSpeedX * PLAYER_STATE.direction, bulletSpeedY);
@@ -1590,6 +1671,52 @@ scene("gameOver", ({ returnScene, lastElement }) => {
     keyPress(["enter", "space"], () => {
         const newElement = getElement(lastElement);
         go(returnScene, { element: newElement });
+    });
+});
+
+scene("title", () => {
+    const element = getElement();
+    const map = addLevel([
+        "x===============!!!!!!!!!!!!!!!!!!=============x",
+        "x= #####                                ##### =x",
+        "x=                                            =x",
+        "x=                       F                    =x",
+        "x=                                            =x",
+        "x=                                            =x",
+        "x=                                            =x",
+        "x=                                            =x",
+        "x=                                            =x",
+        "x=                                            =x",
+        "x=!!!!!!!!!!                        !!!!!!!!!!=x",
+        "x=                                            =x",
+        "x=                                            =x",
+        "x=                                            =x",
+        "x=                                            =x",
+        "x=                                            =x",
+        "x=                                            =x",
+        "x=                       F                    =x",
+        "x=                                            =x",
+        "x= #####                                ##### =x",
+        "x===============##################=============x"
+    ], mapTokenConfig(element));
+
+    const title = add([text("The Periodic Temple of Elements", 12), origin("center"), pos(map.width() / 2, (map.height() / 2) - 25)]);
+    const subtitle = add([text("Press ENTER to begin", 10), origin("center"), pos(map.width() / 2, (map.height() / 2) + 25)]);
+
+    keyPress(["enter", "space"], () => {
+        // "I stood in front of the door of a long-forgotten temple.\nI knew that horrible dangers awaited me there, but I wasn't afraid.\nAn ominous light emanates from the crumbling chamber far below.\nThe light changed colors - red, blue, brown, white.\nThe Periodic Temple of Elements!",
+
+        destroy(title);
+        destroy(subtitle);
+        introBox = addHintBox(map);
+        introText = addHintText("CONTROLS:\n\nA - move / aim left\n\nS - aim down\n\nD - move / aim right\n\nW - Jump / aim up\n\nShift - Boost in the direction\nyou're moving\n\n. - Aim without moving\n\nLeft / up - Cycle weapons back (if unlocked)\n\nRight / down - Cycle weapons forward (if unlocked)\n\nBe careful not to boost at walls -\n\nyou might not live to tell the tale!\n\n\nPress ENTER to continue", map);
+        wait(0.25, () => {
+            keyPress(["enter", "space"], () => {
+                fadeOut(introBox);
+                fadeOut(introText);
+                go("one", {});
+            });
+        });
     });
 });
 
@@ -1865,4 +1992,4 @@ const overrides = (window.location.search.match(/\?levelOverride=(\w*)(?:&elemen
 const levelOverride = (overrides || [])[1];
 const elementOverride = (overrides || [])[2];
 
-start(levelOverride ? levelOverride : "one", { previousElement: elementOverride || undefined });
+start(levelOverride ? levelOverride : "title", { previousElement: elementOverride || undefined });
